@@ -26,6 +26,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>GraffBap</title>
+    <link rel="icon" type="image/png" href="/Images/Favicon/Can1.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Stardos+Stencil:wght@700&family=Allerta+Stencil&display=swap" rel="stylesheet" />
@@ -205,6 +206,7 @@
         <div class="term-status"><span class="dot" aria-hidden="true"></span><a class="term-link" href="https://boxbap.com" target="_blank" rel="noopener noreferrer">Brought to you by BoxBap.com</a></div>
         <div class="term-logo">GraffBap</div>
         <div class="term-right">
+          <span id="museum-wrap" title="The Museum is currently empty. Doors open when the Hall of Fame overflows."><button id="museum-btn" type="button" disabled>Museum</button></span>
           <button id="landing-mute" class="icon" type="button" aria-pressed="false" aria-label="Mute all sounds" title="Mute – Toggle all sounds"></button>
           <button id="landing-account" type="button">Sign In with BoxBap.com</button>
         </div>
@@ -220,11 +222,17 @@
           <button id="sc-play" class="rb-btn" type="button" title="Play/Pause (Space)">Pause</button>
           <button id="sc-speed" class="rb-btn" type="button" title="Speed: Crawl / Cruise / Highball">Cruise 1x</button>
           <label class="rb-skip" title="Only roll cars that carry paint"><input id="sc-skip-blanks" type="checkbox" /> Skip Blank</label>
+          <select id="sc-sort" class="rb-sort" aria-label="Sort the Mainline">
+            <option value="top">Top Rated</option>
+            <option value="grave">The Graveyard</option>
+            <option value="random">Random / Shuffle</option>
+          </select>
           <span class="rb-sep" aria-hidden="true"></span>
           <span id="sc-active" class="rb-active" aria-live="polite">ACTIVE: —</span>
           <button id="sc-props" class="rb-btn rb-props" type="button" aria-pressed="false">+1 Prop (<span class="rb-count">0</span>)</button>
           <button id="sc-toy" class="rb-btn rb-toy" type="button" aria-pressed="false">Toy (<span class="rb-count">0</span>)</button>
           <button id="sc-bench" class="rb-btn" type="button" title="Bench View – inspect this car up close">Bench</button>
+          <button id="sc-report" class="rb-btn rb-report" type="button" title="Report this car to moderators">Report</button>
         </div>
       </section>
       <section class="dispatch">
@@ -274,9 +282,10 @@
         <aside id="dossier" aria-live="polite">
           <div class="dz-kicker">YARD DOSSIER</div>
           <h2 id="dz-name"></h2>
+          <div id="dz-location" class="dz-sub"></div>
+          <div id="dz-badge" class="dz-badge"></div>
           <p id="dz-lore"></p>
           <dl>
-            <dt>Location</dt><dd id="dz-location"></dd>
             <dt>Surface</dt><dd id="dz-surface"></dd>
             <dt>Rules</dt><dd id="dz-rules"></dd>
             <dt>Cars on line</dt><dd id="dz-cars"></dd>
@@ -291,17 +300,24 @@
         <div class="reel-head">
           <span id="subway-title" class="reel-title">THE SUBWAY LINE</span>
           <button id="sub-back" class="reel-back" type="button" hidden>Back to Subway Line</button>
+          <button id="sub-sound" class="reel-sound" type="button" aria-pressed="false" title="Sound on / off"></button>
         </div>
         <div class="reel-track"><canvas id="subway-canvas"></canvas></div>
         <div id="sub-bar" class="reel-bar">
           <button id="sub-play" class="rb-btn" type="button" title="Play/Pause">Pause</button>
           <button id="sub-speed" class="rb-btn" type="button" title="Speed: Crawl / Cruise / Highball">Cruise 1x</button>
           <label class="rb-skip" title="Only roll cars that carry paint"><input id="sub-skip-blanks" type="checkbox" /> Skip Blank</label>
+          <select id="sub-sort" class="rb-sort" aria-label="Sort the Subway Line">
+            <option value="top">Top Rated</option>
+            <option value="grave">The Graveyard</option>
+            <option value="random">Random / Shuffle</option>
+          </select>
           <span class="rb-sep" aria-hidden="true"></span>
           <span id="sub-active" class="rb-active" aria-live="polite">ACTIVE: —</span>
           <button id="sub-props" class="rb-btn rb-props" type="button" aria-pressed="false">+1 Prop (<span class="rb-count">0</span>)</button>
           <button id="sub-toy" class="rb-btn rb-toy" type="button" aria-pressed="false">Toy (<span class="rb-count">0</span>)</button>
           <button id="sub-bench" class="rb-btn" type="button" title="Bench View – inspect this car up close">Bench</button>
+          <button id="sub-report" class="rb-btn rb-report" type="button" title="Report this car to moderators">Report</button>
         </div>
       </section>
       <footer class="term-footer">
@@ -311,6 +327,14 @@
         <button id="tos-open" type="button">Terms of Service</button>
       </footer>
     </div>
+    <dialog id="museum-dialog" aria-labelledby="museum-title">
+      <header class="museum-head">
+        <h2 id="museum-title">THE MUSEUM · BLACK BOOK</h2>
+        <span id="museum-hof"></span>
+        <button id="museum-close" type="button">Close</button>
+      </header>
+      <div id="museum-grid"></div>
+    </dialog>
     <dialog id="tos-dialog" aria-labelledby="tos-title">
       <h2 id="tos-title">Terms of Service</h2>
       <ul>

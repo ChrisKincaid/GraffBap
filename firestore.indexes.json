@@ -1,0 +1,57 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "graffiti_cars",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "division", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "net", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "graffiti_cars",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "division", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "net", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "graffiti_cars",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "division", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "rnd", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "graffiti_cars",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "buffScore", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "graffiti_cars",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "net", "order": "ASCENDING" },
+        { "fieldPath": "hofAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "graffiti_cars",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "net", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

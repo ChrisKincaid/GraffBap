@@ -363,6 +363,36 @@ body.showcase #landing {
   gap: 8px;
 }
 
+#museum-btn {
+  padding: 7px 12px;
+  border: 1px solid #ffd200;
+  border-radius: 8px;
+  background: transparent;
+  color: #ffd200;
+  font: 700 12px/1 ui-monospace, monospace;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+
+#museum-btn:hover:not(:disabled) {
+  background: #ffd200;
+  color: #111;
+}
+
+#museum-wrap {
+  display: inline-flex;
+}
+
+#museum-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+#museum-wrap[title]:not([title='']) {
+  cursor: not-allowed;
+}
+
 #landing-mute {
   display: flex;
   align-items: center;
@@ -578,6 +608,22 @@ body.showcase #landing {
   background: #3a3d44;
 }
 
+.rb-sort {
+  padding: 4px 6px;
+  border: 1px solid #444;
+  border-radius: 6px;
+  background: #1b1d22;
+  color: #ddd;
+  font: inherit;
+  cursor: pointer;
+}
+
+.rb-report {
+  border-color: #3a3d44;
+  background: transparent;
+  color: #8a877f;
+}
+
 .rb-active {
   flex: 1;
   min-width: 140px;
@@ -630,7 +676,8 @@ body.showcase #landing {
 .dispatch {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
-  gap: 18px;
+  gap: 10px;
+  align-items: start;
   width: min(1400px, 96vw);
 }
 
@@ -644,8 +691,8 @@ body.showcase #landing {
 
 .yard-map {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
   align-content: start;
 }
 
@@ -670,8 +717,9 @@ body.showcase #landing {
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 7px 12px 14px;
+  gap: 3px;
+  min-height: 0;
+  padding: 6px 8px;
   border: 1px solid #3a3d44;
   border-radius: 6px;
   background: #1b1d22;
@@ -683,10 +731,10 @@ body.showcase #landing {
 .yard-tile::after {
   content: '';
   position: absolute;
-  left: 14px;
-  right: 14px;
-  bottom: 8px;
-  height: 4px;
+  left: 8px;
+  right: 8px;
+  bottom: 4px;
+  height: 3px;
   border-top: 1px solid #555;
   border-bottom: 1px solid #555;
   background: repeating-linear-gradient(90deg, transparent 0 8px, #5a4632 8px 11px);
@@ -713,13 +761,42 @@ body.showcase #landing {
 }
 
 .tile-name {
-  font: 800 18px/1.1 Impact, 'Arial Black', sans-serif;
+  font: 800 16px/1.1 Impact, 'Arial Black', sans-serif;
   letter-spacing: 0.04em;
 }
 
-.tile-meta {
+.tile-meta,
+.tile-rules {
+  overflow: hidden;
   color: #a9a59b;
-  font-size: 12px;
+  font-size: 11px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.yard-tile .tile-tag {
+  order: 2;
+}
+
+.yard-tile .tile-name {
+  order: 1;
+}
+
+.tile-rules {
+  color: #8a877f;
+}
+
+.tile-loc,
+.dz-sub {
+  color: #c8c4ba;
+  font: 600 12px/1.2 ui-monospace, monospace;
+}
+
+.dz-badge {
+  margin: 4px 0 6px;
+  color: #ffd200;
+  font: 700 10px/1 ui-monospace, monospace;
+  letter-spacing: 0.14em;
 }
 
 #dossier h2 {
@@ -2112,6 +2189,118 @@ body.rollby #toolbar {
 
 #tos-open:hover {
   color: #ffd200;
+}
+
+#museum-dialog {
+  width: min(1100px, 94vw);
+  max-height: 86vh;
+  box-sizing: border-box;
+  padding: 0;
+  border: 1px solid #3a3d44;
+  border-top: 3px solid #ffd200;
+  border-radius: 8px;
+  background: #0e0f12;
+  color: #e8e6e1;
+  font: 13px/1.4 system-ui, sans-serif;
+}
+
+#museum-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.7);
+}
+
+.museum-head {
+  position: sticky;
+  top: 0;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 16px;
+  border-bottom: 1px solid #2c2f36;
+  background: #0e0f12;
+}
+
+#museum-title {
+  margin: 0;
+  color: #ffd200;
+  font: 900 20px/1 Impact, 'Arial Black', sans-serif;
+  letter-spacing: 0.06em;
+}
+
+#museum-hof {
+  flex: 1;
+  color: #8a877f;
+  font: 600 12px/1 ui-monospace, monospace;
+}
+
+#museum-close {
+  padding: 6px 12px;
+  border: 1px solid #444;
+  border-radius: 6px;
+  background: #1b1d22;
+  color: #ddd;
+  cursor: pointer;
+}
+
+#museum-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+  padding: 16px;
+  overflow-y: auto;
+}
+
+#museum-grid[data-state='loading']::before,
+#museum-grid[data-state='empty']::before,
+#museum-grid[data-state='error']::before {
+  grid-column: 1 / -1;
+  color: #8a877f;
+}
+
+#museum-grid[data-state='loading']::before {
+  content: 'Opening the black book…';
+}
+
+#museum-grid[data-state='empty']::before {
+  content: 'No legends yet – cars enter the Hall of Fame once they clear the net props bar.';
+}
+
+#museum-grid[data-state='error']::before {
+  content: 'The Museum is closed right now – try again shortly.';
+}
+
+.museum-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid #2c2f36;
+  border-radius: 6px;
+  background: #15171b;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.museum-card:hover {
+  border-color: #ffd200;
+}
+
+.museum-card img {
+  width: 100%;
+  aspect-ratio: 3820 / 780;
+  object-fit: cover;
+  border-radius: 3px;
+  background: #8d9297;
+}
+
+.museum-card b {
+  color: #ffd200;
+}
+
+.museum-card span {
+  color: #8a877f;
+  font: 600 11px/1.3 ui-monospace, monospace;
 }
 
 #tos-dialog {

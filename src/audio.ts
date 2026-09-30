@@ -221,3 +221,87 @@ export function stopClatter(): void {
   clearInterval(clatter.timer);
   clatter = null;
 }
+
+// ---------- Subway: quick bright rail ticks with an occasional wheel squeal ----------
+const SUB_TICK_PERIOD = 0.55;
+let subway: { timer: number; next: number; nextSqueal: number; rate: number } | null = null;
+
+// Lighter, higher double-tick than the freight thunk: short cars on jointed track.
+function tick(a: AudioContext, t: number, level: number): void {
+  const src = a.createBufferSource();
+  src.buffer = noise;
+  const bp = a.createBiquadFilter();
+  bp.type = 'bandpass';
+  bp.frequency.value = 2400 + Math.random() * 400;
+  bp.Q.value = 4;
+  src.connect(bp).connect(envelope(a, t, 0.18 * level, 0.001, 0.035));
+  src.start(t, Math.random() * 1.5, 0.05);
+
+  const ping = a.createOscillator();
+  ping.type = 'triangle';
+  ping.frequency.value = 3200 + Math.random() * 300;
+  ping.connect(envelope(a, t, 0.02 * level, 0.001, 0.05));
+  ping.start(t);
+  ping.stop(t + 0.07);
+}
+
+// Flange-on-rail screech through curves: a warbling high partial that swells and fades.
+function squeal(a: AudioContext, t: number): void {
+  const f = 2600 + Math.random() * 900;
+  const dur = 0.5 + Math.random() * 0.6;
+  const o = a.createOscillator();
+  o.type = 'triangle';
+  o.frequency.setValueAtTime(f, t);
+  o.frequency.linearRampToValueAtTime(f * (0.96 + Math.random() * 0.08), t + dur);
+  const lfo = a.createOscillator();
+  lfo.frequency.value = 6 + Math.random() * 5;
+  const depth = a.createGain();
+  depth.gain.value = f * 0.012;
+  lfo.connect(depth).connect(o.frequency);
+  const bp = a.createBiquadFilter();
+  bp.type = 'bandpass';
+  bp.frequency.value = f;
+  bp.Q.value = 9;
+  const g = a.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(0.012, t + dur * 0.35);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(bp).connect(g).connect(master!);
+  o.start(t);
+  o.stop(t + dur + 0.05);
+  lfo.start(t);
+  lfo.stop(t + dur + 0.05);
+}
+
+function scheduleSubway(): void {
+  if (!ac || !subway) return;
+  while (subway.next < ac.currentTime + 0.2) {
+    const period = SUB_TICK_PERIOD / subway.rate;
+    tick(ac, subway.next, 1);
+    tick(ac, subway.next + Math.min(0.09, period * 0.16), 0.7);
+    subway.next += period;
+  }
+  if (ac.currentTime >= subway.nextSqueal) {
+    squeal(ac, ac.currentTime + 0.05);
+    subway.nextSqueal = ac.currentTime + 14 + Math.random() * 14;
+  }
+}
+
+export function startSubwayRumble(rate: number): void {
+  const a = audio();
+  if (!a) return;
+  if (subway) {
+    subway.rate = rate;
+    return;
+  }
+  const t = a.currentTime;
+  subway = { timer: 0, next: t + 0.05, nextSqueal: t + 6 + Math.random() * 6, rate };
+  subway.timer = window.setInterval(scheduleSubway, 50);
+  scheduleSubway();
+}
+
+export function stopSubwayRumble(): void {
+  if (!subway) return;
+  clearInterval(subway.timer);
+  subway = null;
+}

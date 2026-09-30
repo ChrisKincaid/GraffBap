@@ -36,8 +36,6 @@ const PUBLIC_YARDS = 'graffiti_public_yards';
 
 export type PublicYardId =
   | 'quick_20m'
-  | 'day_8h'
-  | 'week_7d'
   | 'junkyard'
   | 'hot_5m'
   | 'rust_bucket'
