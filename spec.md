@@ -1,0 +1,19 @@
+## Development Checklist
+- [ ] Task 1.1: Initialize Vite + TypeScript project structure with HTML5 Canvas viewport.
+- [ ] Task 1.2: Build layered train car canvas (base steel background, drawing layer, window mask).
+- [ ] Task 1.3: Implement zoom & horizontal pan controls for 4000x1200px car resolution.
+- [ ] Task 1.4: Implement Unified Spray Tool (size, feather/hardness, opacity sliders).
+- [ ] Task 1.5: Implement Color Picker and active swatch palette.
+- [ ] Task 2.1: Add Straight-Line assist (`Shift` key / toggle) and Angle Snapping.
+- [ ] Task 2.2: Add Paint Roller and Paintball Gun specialty tools.
+- [ ] Task 2.3: Add Stencil Creator modal and custom brush angle/aspect ratio controls.
+- [ ] Task 2.4: Build Ghost Yard solo sandbox with continuous LocalStorage auto-save.
+- [ ] Task 3.1: Set up Node.js + Express + Socket.io backend for yard management.
+- [ ] Task 3.2: Implement 20-car train consist model (Freight vs. Subway lines).
+- [ ] Task 3.3: Implement Yard lifecycles (20m, 8h, 7d), Respect/Battle modes, 5-car cap per writer.
+- [ ] Task 3.4: Real-time stroke synchronization across connected users.
+- [ ] Task 4.1: Build server-side car flattener (raw strokes -> WebP asset upon departure).
+- [ ] Task 4.2: Build dual-line animated roll-through main page with click-to-pause inspection.
+- [ ] Task 4.3: Implement "Props" voting, dynamic buff decay, and permanent archive roster.
+- [ ] Task 5.1: Build Admin Dashboard route for live tuning and content moderation.
+- [ ] Task 5.2: UI polish and sound effects (spray can shake, yard horns, train clatter).

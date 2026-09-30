@@ -1,0 +1,450 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <style>
+      html,
+      body {
+        margin: 0;
+        background-color: #0a0a0c;
+      }
+      body {
+        opacity: 1;
+        transition: opacity 0.15s ease-in;
+      }
+      body:not(.ready) {
+        opacity: 0;
+        visibility: hidden;
+      }
+    </style>
+    <noscript><style>body:not(.ready) { opacity: 1; visibility: visible; }</style></noscript>
+    <script>
+      // Never leave the page hidden if the app bundle or an asset stalls.
+      setTimeout(function () {
+        document.body && document.body.classList.add('ready');
+      }, 500);
+    </script>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>GraffBap</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Stardos+Stencil:wght@700&family=Allerta+Stencil&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <canvas id="viewport"></canvas>
+    <div id="toolbar">
+      <div class="dock-row">
+        <div class="cluster" role="group" aria-label="Tools">
+          <div id="tools" class="seg" role="group" aria-label="Tool">
+            <button type="button" data-tool="spray" aria-pressed="true" title="Spray (1) – Classic aerosol can with variable flare and pressure">Spray</button>
+            <button type="button" data-tool="roller" aria-pressed="false" title="Roller (2) – Extension-pole roller for fast vertical block fills">Roller</button>
+            <button type="button" data-tool="mop" aria-pressed="false" title="Mop (3) – Squeeze marker; drag slowly for heavy ink and drips">Mop</button>
+            <button type="button" data-tool="chisel" aria-pressed="false" title="Chisel (4) – 45&deg; flat-nib marker: broad pulls, razor-thin slices">Chisel</button>
+            <button type="button" data-tool="paintball" aria-pressed="false" title="Paintball (5) – Hold to fire splatter bursts">Paintball</button>
+            <button type="button" data-tool="buff" aria-pressed="false" title="Buff (6) – Yard Buff eraser: cleans paint back to bare metal">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M16 3l5 5-11 11H6l-3-3z"/><path d="M9 10l5 5M6 19h15"/></svg>Buff
+            </button>
+          </div>
+        </div>
+        <div class="cluster" role="group" aria-label="Tool options">
+          <div id="tool-options">
+            <div id="cap-options" class="seg" role="group" aria-label="Spray cap">
+              <button type="button" data-cap="fat" aria-pressed="true" title="Fat cap (C) – Wide, soft, dusty flare for fast fills">Fat</button>
+              <button type="button" data-cap="skinny" aria-pressed="false" title="Skinny cap (C) – Tight, crisp line for outlines and cuts">Skinny</button>
+            </div>
+            <div id="roller-options" class="seg" role="group" aria-label="Roller width" hidden>
+              <button type="button" data-roller="standard" aria-pressed="true" title="9&Prime; standard roller – Regular fill passes">9&Prime;</button>
+              <button type="button" data-roller="wide" aria-pressed="false" title="18&Prime; block roller – Massive whole-panel passes">18&Prime;</button>
+            </div>
+          </div>
+          <div class="flyout">
+            <button id="stencil-btn" type="button" aria-expanded="false" aria-controls="stencil-menu" title="Stencils – Shape, text and bar masks (B / Enter to stamp)">Stencils</button>
+            <div id="stencil-menu" hidden>
+              <div class="seg" role="group" aria-label="Stencil shape">
+                <button type="button" data-stencil="diamond" aria-pressed="false" title="Hazard diamond">Diamond</button>
+                <button type="button" data-stencil="stripes" aria-pressed="false" title="Caution stripes">Stripes</button>
+                <button type="button" data-stencil="star" aria-pressed="false" title="Five-point star">Star</button>
+                <button type="button" data-stencil="target" aria-pressed="false" title="Crosshair target">Target</button>
+                <button type="button" data-stencil="text" aria-pressed="false" title="Custom text stencil">Text</button>
+                <button type="button" data-stencil="bar" aria-pressed="false" title="Bar / strip: stretch for sill cuts and stripes">Bar</button>
+              </div>
+              <input id="stencil-text" type="text" maxlength="12" placeholder="MONIKER" aria-label="Stencil text" autocomplete="off" spellcheck="false" />
+              <button id="stencil-invert" type="button" aria-pressed="false" title="Protect the shape instead of cutting through it">Invert</button>
+              <button id="stencil-adjust" type="button" aria-pressed="false" title="Drag the sheet to move it; drag the corner handle to resize">Adjust</button>
+              <button id="stencil-bake" type="button" title="Bake &amp; Peel (B / Enter) – Fill the opening with the current color and lift the stencil">Bake &amp; Peel</button>
+            </div>
+          </div>
+          <div id="sliders">
+            <label title="Size ([ ]) – Brush, nib or roller size">Size <input id="brush-size" type="range" min="2" max="150" value="40" /><output for="brush-size"></output></label>
+            <label title="Hardness – Soft halo to hard edge">Hard <input id="brush-hardness" type="range" min="0" max="100" value="20" data-unit="%" /><output for="brush-hardness"></output></label>
+            <label title="Opacity – Paint coverage per pass">Opac <input id="brush-opacity" type="range" min="5" max="100" value="80" data-unit="%" /><output for="brush-opacity"></output></label>
+          </div>
+        </div>
+        <div class="cluster" role="group" aria-label="Color">
+          <div id="swatches" role="group" aria-label="Spray paint presets"></div>
+          <input id="brush-color" type="color" value="#ffffff" aria-label="Custom color" title="Custom color (X swaps last two)" />
+        </div>
+      </div>
+      <div class="dock-row">
+        <div class="cluster" role="group" aria-label="Navigation">
+          <select id="yard-select" aria-label="Yard" title="Yard – Private Ghost Yard or shared public yards"></select>
+          <div id="consist" role="group" aria-label="Car">
+            <button id="car-prev" type="button" title="Previous car (&lt;)">&lt;</button>
+            <select id="car-select" aria-label="Car number" title="Jump to car (• = painted)"></select>
+            <span>/ 20</span>
+            <button id="car-next" type="button" title="Next car (&gt;)">&gt;</button>
+          </div>
+          <button id="reset-view" class="icon" type="button" aria-label="Reset view" title="Reset view (0) – Fit and center the car">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/><circle cx="12" cy="12" r="2.5"/></svg>
+          </button>
+          <div class="flyout">
+            <button id="buff-train-btn" class="icon" type="button" aria-expanded="false" aria-controls="buff-confirm" aria-label="Buff whole train" title="Buff Train – Buff the entire consist (Ghost Yard only)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M14 3l7 7"/><path d="M12 5l7 7-4 4-7-7z"/><path d="M8 9l-5 5 7 7 5-5"/></svg>
+            </button>
+            <div id="buff-confirm" role="alertdialog" aria-label="Confirm buff whole train" hidden>
+              <span>Buff all 20 cars? This wipes your private yard.</span>
+              <button id="buff-yes" type="button">Buff</button>
+              <button id="buff-no" type="button">Cancel</button>
+            </div>
+          </div>
+        </div>
+        <div class="cluster" role="group" aria-label="Actions">
+          <button id="undo" class="icon" type="button" aria-label="Undo" title="Undo (Ctrl+Z)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 010 12h-3"/></svg>
+          </button>
+          <button id="redo" class="icon" type="button" aria-label="Redo" title="Redo (Ctrl+Y)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 14l5-5-5-5"/><path d="M20 9H10a6 6 0 000 12h3"/></svg>
+          </button>
+          <button id="clear-paint" class="icon" type="button" aria-label="Clear car paint" title="Clear – Wipe this car's paint">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>
+          </button>
+          <button id="sketch-btn" class="icon" type="button" aria-pressed="false" aria-label="Chalk sketch mode" title="Sketch (S) – Chalk guide overlay">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20l4-1 11-11-3-3L5 16z"/><path d="M14 7l3 3"/></svg>
+          </button>
+          <button id="sketch-clear" class="icon" type="button" aria-label="Clear sketch" title="Clear Sketch – Wipe chalk guides only">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20l4-1 6-6"/><path d="M15 4l6 6M21 4l-6 6"/></svg>
+          </button>
+          <button id="flash-btn" class="icon" type="button" aria-pressed="false" aria-label="Yard flashlight" title="Flashlight (F) – Yard work-light">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M7 3h10l-2 6v12H9V9z"/><path d="M9 9h6M12 13v3"/></svg>
+          </button>
+          <button id="rollby-btn" class="icon" type="button" aria-label="Roll-By playback" title="Roll-By – Watch the whole train roll past">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="11" rx="1"/><path d="M3 10.5h18M1 16h22"/><circle cx="7.5" cy="19" r="1.8"/><circle cx="16.5" cy="19" r="1.8"/></svg>
+          </button>
+          <button id="gallery-btn" class="icon" type="button" aria-label="Exit to Dispatch" title="Exit to Dispatch – Back to the terminal">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="1.5"/><path d="M7 9l3 2.5L7 14M12 14h4M8 21h8M12 17v4"/></svg>
+          </button>
+          <button id="export-car" class="icon" type="button" aria-label="Export car as PNG" title="Export – Save this car as a PNG">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>
+          </button>
+          <button id="mute-btn" class="icon" type="button" aria-pressed="false" aria-label="Mute sounds" title="Mute – Toggle all sounds"></button>
+          <button id="help-btn" type="button" aria-label="Keyboard shortcuts" title="Help (?) – Keyboard shortcuts">?</button>
+          <button id="tips-btn" class="icon" type="button" aria-pressed="true" aria-label="Tooltips" title="Tooltips – Show or hide control labels">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/></svg>
+          </button>
+        </div>
+        <div class="cluster" role="group" aria-label="Account">
+          <span id="save-status" aria-live="polite"></span>
+          <button id="sync-btn" class="icon" type="button" aria-label="Cloud sync" title="Cloud Sync – Back up your pieces with your BoxBap.com Profile">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 9a4 4 0 0 1 0 9z"/><path d="M12 16v-5M9.5 13.5L12 11l2.5 2.5"/></svg>
+          </button>
+          <span id="user-name" hidden></span>
+          <button id="auth-btn" type="button" hidden title="Sign in / out – Sync your Ghost Yard">Sign In</button>
+        </div>
+      </div>
+    </div>
+    <button id="dock-toggle" type="button" aria-expanded="true" aria-controls="toolbar" aria-label="Show or hide tools" title="Show / hide tools">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+    </button>
+    <div id="stencil-hud" hidden>
+      <button id="hud-adjust" type="button" aria-pressed="false" title="Move / resize / rotate the stencil (painting pauses while moving)">Move</button>
+      <button id="hud-invert" type="button" aria-pressed="false" title="Invert – Protect the shape and paint around it">Invert</button>
+      <button id="hud-bake" type="button" title="Bake &amp; Peel (B / Enter) – Fill the opening with the current color and lift the stencil">Bake &amp; Peel</button>
+      <button id="hud-peel" type="button" aria-label="Peel off stencil" title="Peel off stencil (Esc) – paint stays">&#x2715; Peel</button>
+    </div>
+    <div id="tip" role="tooltip" hidden></div>
+    <div id="rotate-overlay" role="alert">
+      <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="16" y="6" width="16" height="28" rx="3"/><path d="M22 30h4"/><path d="M8 30a16 16 0 0 0 16 12"/><path d="M8 38v-8h8"/></svg>
+      <p>Rotate device to landscape to paint</p>
+    </div>
+    <button id="back-dispatch" type="button" title="Save and return to the Dispatch terminal">&larr; Back to Dispatch</button>
+    <div id="yard-hud" hidden aria-live="polite">
+      <span id="yh-name"></span>
+      <span id="yh-status"></span>
+      <div id="yh-gauge" hidden title="Aerosol pressure"><div id="yh-gauge-fill"></div></div>
+    </div>
+    <aside id="junk-panel" hidden aria-label="Junkyard line">
+      <div class="jp-kicker">THE JUNKYARD · BATTLE TRACK</div>
+      <div id="junk-status"></div>
+      <div class="jp-actions">
+        <button id="junk-action" type="button">[ Start Painting ]</button>
+        <button id="junk-leave" type="button" hidden>[ Leave Line ]</button>
+      </div>
+    </aside>
+    <aside id="chat-sidebar" hidden aria-label="Car chat">
+      <header class="cs-head">
+        <div>
+          <div class="cs-kicker">SIDELINE · LIVE</div>
+          <div id="chat-title"></div>
+        </div>
+        <button id="chat-collapse" type="button" aria-label="Hide chat" title="Hide chat">&#x276F;</button>
+      </header>
+      <ul id="chat-list" aria-live="polite"></ul>
+      <form id="chat-form">
+        <input id="chat-input" type="text" autocomplete="off" placeholder="Talk from the sideline… (Enter to send)" />
+      </form>
+      <p class="cs-note">Chat lives with this car and is deleted when it pulls out.</p>
+    </aside>
+    <button id="chat-tab" type="button" aria-label="Show chat" title="Show chat">&#x276E; Chat</button>
+    <div id="still-working" hidden role="alertdialog" aria-labelledby="sw-title">
+      <h2 id="sw-title">Still working?</h2>
+      <p>No strokes in a while. Confirm in 10 seconds or the car passes to the next writer.</p>
+      <button id="still-continue" class="cta" type="button">[ Continue ]</button>
+    </div>
+    <div id="landing">
+      <header class="term-bar">
+        <div class="term-status"><span class="dot" aria-hidden="true"></span><a class="term-link" href="https://boxbap.com" target="_blank" rel="noopener noreferrer">Brought to you by BoxBap.com</a></div>
+        <div class="term-logo">GraffBap</div>
+        <div class="term-right">
+          <button id="landing-mute" class="icon" type="button" aria-pressed="false" aria-label="Mute all sounds" title="Mute – Toggle all sounds"></button>
+          <button id="landing-account" type="button">Sign In with BoxBap.com</button>
+        </div>
+      </header>
+      <section id="showcase-frame" class="reel" aria-label="The Mainline">
+        <div class="reel-head">
+          <span id="reel-title" class="reel-title">THE MAINLINE · TOP-RATED</span>
+          <button id="reel-back" class="reel-back" type="button" hidden>Back to Mainline</button>
+          <button id="sc-sound" class="reel-sound" type="button" aria-pressed="false" title="Sound on / off"></button>
+        </div>
+        <div class="reel-track"><canvas id="showcase-canvas"></canvas></div>
+        <div id="showcase-bar" class="reel-bar">
+          <button id="sc-play" class="rb-btn" type="button" title="Play/Pause (Space)">Pause</button>
+          <button id="sc-speed" class="rb-btn" type="button" title="Speed: Crawl / Cruise / Highball">Cruise 1x</button>
+          <label class="rb-skip" title="Only roll cars that carry paint"><input id="sc-skip-blanks" type="checkbox" /> Skip Blank</label>
+          <span class="rb-sep" aria-hidden="true"></span>
+          <span id="sc-active" class="rb-active" aria-live="polite">ACTIVE: —</span>
+          <button id="sc-props" class="rb-btn rb-props" type="button" aria-pressed="false">+1 Prop (<span class="rb-count">0</span>)</button>
+          <button id="sc-toy" class="rb-btn rb-toy" type="button" aria-pressed="false">Toy (<span class="rb-count">0</span>)</button>
+          <button id="sc-bench" class="rb-btn" type="button" title="Bench View – inspect this car up close">Bench</button>
+        </div>
+      </section>
+      <section class="dispatch">
+        <div class="yard-map">
+          <div class="map-title">YARD MAP</div>
+          <div class="div-switch" role="group" aria-label="Division">
+            <button class="div-btn" data-division="freight" type="button" aria-pressed="true">[ FREIGHT DIVISION ]</button>
+            <button class="div-btn" data-division="subway" type="button" aria-pressed="false">[ SUBWAY DIVISION ]</button>
+          </div>
+          <button class="yard-tile" data-yard="ghost" type="button" aria-pressed="true">
+            <span class="tile-tag">PRIVATE</span><span class="tile-name">Ghost Yard</span><span class="tile-meta">Unlimited local canvas · Sign in with BoxBap.com to sync across devices</span>
+          </button>
+          <button class="yard-tile" data-yard="quick" type="button" aria-pressed="false">
+            <span class="tile-tag">PUBLIC · REGULATED LINE</span><span class="tile-name">Bailey Yard</span><span class="tile-meta">First-stroke claim · aerosol gauge · 2-min idle lease</span>
+          </button>
+          <button class="yard-tile" data-yard="junk" type="button" aria-pressed="false">
+            <span class="tile-tag">PUBLIC · BATTLE TRACK</span><span class="tile-name">The Junkyard</span><span class="tile-meta">Line up to 99 per car · 90-second runs · sideline chat</span>
+          </button>
+          <button class="yard-tile" data-yard="hot" type="button" aria-pressed="false">
+            <span class="tile-tag">PUBLIC · FIVE-MINUTE BURNER</span><span class="tile-name">The Hot Yard</span><span class="tile-meta">5:00 countdown from first stroke</span>
+          </button>
+          <button class="yard-tile" data-yard="rust" type="button" aria-pressed="false">
+            <span class="tile-tag">PUBLIC · RELIC LAYUP</span><span class="tile-name">The Rust Bucket</span><span class="tile-meta">Heavy rust texture · first-stroke claim</span>
+          </button>
+          <button class="yard-tile" data-yard="inter" type="button" aria-pressed="false">
+            <span class="tile-tag">PUBLIC · WHOLE-CAR TRACK</span><span class="tile-name">The Intermodal</span><span class="tile-meta">Double gauge · fat caps only · 5-min idle limit</span>
+          </button>
+          <button class="yard-tile" data-yard="s207" type="button" aria-pressed="false" hidden>
+            <span class="tile-tag">PRIVATE · SOLO LAB</span><span class="tile-name">207th Street Yard</span><span class="tile-meta">Unlimited paint · no timers · saved on this device</span>
+          </button>
+          <button class="yard-tile" data-yard="sesp" type="button" aria-pressed="false" hidden>
+            <span class="tile-tag">PUBLIC · REGULATED LINE</span><span class="tile-name">Esplanade Yard</span><span class="tile-meta">First-stroke claim · aerosol gauge · 2-min idle lease</span>
+          </button>
+          <button class="yard-tile" data-yard="stun" type="button" aria-pressed="false" hidden>
+            <span class="tile-tag">PUBLIC · BATTLE TRACK</span><span class="tile-name">1-Tunnel</span><span class="tile-meta">Line up to 99 per car · 90-second runs · cross-outs</span>
+          </button>
+          <button class="yard-tile" data-yard="sbay" type="button" aria-pressed="false" hidden>
+            <span class="tile-tag">PUBLIC · FIVE-MINUTE BURNER</span><span class="tile-name">Baychester Yard</span><span class="tile-meta">5:00 countdown from first stroke</span>
+          </button>
+          <button class="yard-tile" data-yard="scor" type="button" aria-pressed="false" hidden>
+            <span class="tile-tag">PUBLIC · AGED STEEL</span><span class="tile-name">Corona Yard</span><span class="tile-meta">Heavy rust texture · first-stroke claim</span>
+          </button>
+          <button class="yard-tile" data-yard="spit" type="button" aria-pressed="false" hidden>
+            <span class="tile-tag">PUBLIC · WHOLE-CAR TRACK</span><span class="tile-name">Pitkin Yard</span><span class="tile-meta">Double gauge · fat caps only · 5-min idle limit</span>
+          </button>
+        </div>
+        <aside id="dossier" aria-live="polite">
+          <div class="dz-kicker">YARD DOSSIER</div>
+          <h2 id="dz-name"></h2>
+          <p id="dz-lore"></p>
+          <dl>
+            <dt>Location</dt><dd id="dz-location"></dd>
+            <dt>Surface</dt><dd id="dz-surface"></dd>
+            <dt>Rules</dt><dd id="dz-rules"></dd>
+            <dt>Cars on line</dt><dd id="dz-cars"></dd>
+          </dl>
+          <div class="dz-actions">
+            <button id="dz-bomb" class="cta" type="button">[ Bomb This Yard ]</button>
+            <button id="dz-watch" class="cta secondary" type="button">[ Watch Yard Line ]</button>
+          </div>
+        </aside>
+      </section>
+      <section id="subway-frame" class="reel" aria-label="The Subway Line">
+        <div class="reel-head">
+          <span id="subway-title" class="reel-title">THE SUBWAY LINE</span>
+          <button id="sub-back" class="reel-back" type="button" hidden>Back to Subway Line</button>
+        </div>
+        <div class="reel-track"><canvas id="subway-canvas"></canvas></div>
+        <div id="sub-bar" class="reel-bar">
+          <button id="sub-play" class="rb-btn" type="button" title="Play/Pause">Pause</button>
+          <button id="sub-speed" class="rb-btn" type="button" title="Speed: Crawl / Cruise / Highball">Cruise 1x</button>
+          <label class="rb-skip" title="Only roll cars that carry paint"><input id="sub-skip-blanks" type="checkbox" /> Skip Blank</label>
+          <span class="rb-sep" aria-hidden="true"></span>
+          <span id="sub-active" class="rb-active" aria-live="polite">ACTIVE: —</span>
+          <button id="sub-props" class="rb-btn rb-props" type="button" aria-pressed="false">+1 Prop (<span class="rb-count">0</span>)</button>
+          <button id="sub-toy" class="rb-btn rb-toy" type="button" aria-pressed="false">Toy (<span class="rb-count">0</span>)</button>
+          <button id="sub-bench" class="rb-btn" type="button" title="Bench View – inspect this car up close">Bench</button>
+        </div>
+      </section>
+      <footer class="term-footer">
+        <a href="https://www.boxbap.com" target="_blank" rel="noopener noreferrer">
+          <img src="/Images/BoxBapLogoSm.png" alt="BoxBap.com logo" />
+        </a>
+        <button id="tos-open" type="button">Terms of Service</button>
+      </footer>
+    </div>
+    <dialog id="tos-dialog" aria-labelledby="tos-title">
+      <h2 id="tos-title">Terms of Service</h2>
+      <ul>
+        <li><b>As-is, for fun.</b> GraffBap is provided as-is for artistic, recreational, and entertainment leisure.</li>
+        <li><b>Your work stays yours.</b> You keep ownership of your creations, and you agree not to upload or generate abusive, harassing, or unlawful content.</li>
+        <li><b>No guarantees.</b> We don't guarantee persistent storage or uptime. Cars and sessions may be modified or archived according to yard gameplay mechanics.</li>
+      </ul>
+      <button id="tos-close" class="cta" type="button">Close</button>
+    </dialog>
+    <div id="car-card" hidden>
+      <div class="cc-title"></div>
+      <div class="cc-writer"></div>
+      <div class="cc-origin"></div>
+      <div class="cc-date"></div>
+      <div class="cc-approval"></div>
+      <div class="cc-actions">
+        <div class="cc-badge" aria-live="polite">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2c1 3.5 5 6 5 11a5 5 0 0 1-10 0c0-2.5 1.2-4 2.5-5.5.3 2 1.2 3 2.3 3.3C11 8 11 5 12 2z"/></svg>
+          <span id="cc-props-count">0</span><span class="cc-badge-label">PROPS</span>
+        </div>
+        <button id="cc-props" type="button" aria-label="Give props" title="Give Props">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><rect x="7" y="9" width="8" height="13" rx="1.5"/><path d="M9 9V6h4v3M10 6V4h2"/><path d="M16 4.5h1M18.5 3l.8-.8M18.5 6l.8.8M20 4.5h1.5"/></svg>
+          GIVE PROPS
+        </button>
+        <button id="cc-toy" class="toy-btn" type="button" aria-pressed="false" aria-label="Call it toy" title="Toy – vote this piece down">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/></svg>
+          TOY <span id="cc-toy-count" class="toy-count">0</span>
+        </button>
+        <button id="cc-bench" type="button" aria-label="Open Bench View" title="Bench View – inspect this car up close">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21M10.5 7.5v6M7.5 10.5h6"/></svg>
+        </button>
+      </div>
+    </div>
+    <div id="writer-id" hidden role="dialog" aria-labelledby="wid-title">
+      <div class="wid-kicker"><img src="/Images/BoxBapLogoSm.png" alt="BoxBap.com" /></div>
+      <h2 id="wid-title">BOXBAP.COM PROFILE REQUIRED</h2>
+      <p>One profile for BoxBap.com and GraffBap. Sign in with your existing BoxBap.com profile, or create one to drop props and save your pieces.</p>
+      <button id="wid-continue" class="cta" type="button">[ Continue with BoxBap.com ]</button>
+      <button id="wid-dismiss" type="button">Keep writing as a guest</button>
+    </div>
+    <div id="bench" hidden role="dialog" aria-modal="true" aria-label="Bench View">
+      <div id="bench-view"><canvas id="bench-canvas"></canvas></div>
+      <div class="bench-top">
+        <span class="bench-kicker">BENCH VIEW</span>
+        <span id="bench-title"></span>
+        <span class="bench-hint">Scroll or pinch to zoom · drag to pan</span>
+        <button id="bench-close" type="button" aria-label="Close Bench View" title="Close (Esc)">&#x2715;</button>
+      </div>
+      <div class="bench-meta">
+        <div class="bench-info">
+          <div id="bench-writer"></div>
+          <div id="bench-origin"></div>
+          <div id="bench-approval" class="cc-approval"></div>
+        </div>
+        <label class="bench-toggle"><input id="bench-bg" type="checkbox" checked /> Yard backdrop</label>
+        <div id="bench-badge" class="cc-badge" aria-live="polite">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2c1 3.5 5 6 5 11a5 5 0 0 1-10 0c0-2.5 1.2-4 2.5-5.5.3 2 1.2 3 2.3 3.3C11 8 11 5 12 2z"/></svg>
+          <span id="bench-props-count">0</span><span class="cc-badge-label">PROPS</span>
+        </div>
+        <button id="bench-props" type="button" aria-label="Give props">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><rect x="7" y="9" width="8" height="13" rx="1.5"/><path d="M9 9V6h4v3M10 6V4h2"/><path d="M16 4.5h1M18.5 3l.8-.8M18.5 6l.8.8M20 4.5h1.5"/></svg>
+          GIVE PROPS
+        </button>
+        <button id="bench-toy" class="toy-btn" type="button" aria-pressed="false" aria-label="Call it toy" title="Toy – vote this piece down">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/></svg>
+          TOY <span id="bench-toy-count" class="toy-count">0</span>
+        </button>
+        <button id="bench-export" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>
+          SAVE PHOTO / EXPORT PNG
+        </button>
+      </div>
+    </div>
+    <div id="rollby-controls" hidden>
+      <span id="rollby-car">Car — / 20</span>
+      <button id="rollby-play" type="button" title="Play/Pause (Space)">Pause</button>
+      <button id="rollby-speed" type="button" title="Speed">Cruise 1x</button>
+      <button id="rollby-export" type="button" title="Export the whole train as a panoramic PNG">Export Train</button>
+      <button id="rollby-exit" type="button" title="Exit (Esc)">Exit</button>
+    </div>
+    <div id="toast" role="status" aria-live="polite" hidden></div>
+    <dialog id="help-dialog" aria-label="Keyboard shortcuts">
+      <div class="help-body">
+        <table>
+          <tr><td><kbd>1</kbd>&ndash;<kbd>6</kbd></td><td>Spray, Roller, Mop, Chisel, Paintball, Buff</td></tr>
+          <tr><td><kbd>[</kbd> <kbd>]</kbd></td><td>Size down / up</td></tr>
+          <tr><td><kbd>C</kbd></td><td>Fat / Skinny cap (Spray)</td></tr>
+          <tr><td><kbd>R</kbd></td><td>Rattle the can</td></tr>
+          <tr><td><kbd>X</kbd></td><td>Swap last two colors</td></tr>
+          <tr><td><kbd>S</kbd></td><td>Chalk sketch mode (guides aren't saved or exported)</td></tr>
+          <tr><td><kbd>F</kbd></td><td>Yard flashlight (editor only)</td></tr>
+          <tr><td>Stencils</td><td>Pick Diamond, Stripes, Star, Target, Text (12 chars) or Bar from the Stencils menu</td></tr>
+          <tr><td>Move / Done</td><td>Drag the sheet to move, white corner to resize (Bar stretches freely), top knob to rotate (<kbd>Shift</kbd> snaps 15&deg;); painting pauses while moving</td></tr>
+          <tr><td>Invert</td><td>Protect the shape and paint around it instead of through it</td></tr>
+          <tr><td><kbd>B</kbd> / <kbd>Enter</kbd> / Bake &amp; Peel</td><td>Fill the opening with the current color &amp; opacity (one undo step), then lift the stencil</td></tr>
+          <tr><td><kbd>Esc</kbd> / &#x2715; Peel</td><td>Lift the stencil only – no fill; paint sprayed through it stays</td></tr>
+          <tr><td><kbd>Shift</kbd> + drag</td><td>Straight line</td></tr>
+          <tr><td><kbd>Space</kbd> + drag</td><td>Pan (or middle-drag)</td></tr>
+          <tr><td>Wheel</td><td>Zoom to cursor</td></tr>
+          <tr><td><kbd>0</kbd> / double-click background</td><td>Reset view</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>Z</kbd></td><td>Undo</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>Y</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd></td><td>Redo</td></tr>
+          <tr><td><kbd>&lt;</kbd> <kbd>&gt;</kbd></td><td>Previous / next car</td></tr>
+          <tr><td>Roll-By</td><td><kbd>Space</kbd> play/pause &middot; <kbd>Esc</kbd> exit &middot; click a car to paint it</td></tr>
+          <tr><td><kbd>?</kbd></td><td>This sheet</td></tr>
+        </table>
+      </div>
+    </dialog>
+    <dialog id="auth-dialog" aria-labelledby="auth-title">
+      <form id="auth-form">
+        <div class="auth-head">
+          <img src="/Images/BoxBapLogoSm.png" alt="" />
+          <h2 id="auth-title">BoxBap.com Profile</h2>
+        </div>
+        <p class="auth-intro">One profile for BoxBap.com and GraffBap. Sign in with your existing BoxBap.com profile, or create one to drop props and save your pieces.</p>
+        <fieldset id="auth-fields">
+          <div class="auth-social" data-mode="signin">
+            <button id="auth-google" type="button">Continue with Google</button>
+            <button id="auth-github" type="button">Continue with GitHub</button>
+            <div class="auth-divider"><span>or use email</span></div>
+          </div>
+          <label for="auth-name" data-mode="register">Name / Alias</label>
+          <input id="auth-name" data-mode="register" type="text" autocomplete="nickname" maxlength="40" placeholder="Name / Alias" />
+          <label for="auth-email">Email</label>
+          <input id="auth-email" type="email" placeholder="Email" autocomplete="email" required />
+          <label for="auth-password">Password</label>
+          <input id="auth-password" type="password" placeholder="Password" autocomplete="current-password" required minlength="6" />
+          <p id="auth-error" role="alert"></p>
+          <button id="auth-submit" class="auth-primary" type="submit">[ Sign In ]</button>
+          <button id="auth-switch" class="auth-link" type="button">Need a profile? Create one</button>
+        </fieldset>
+        <button id="auth-cancel" type="button">Cancel</button>
+      </form>
+    </dialog>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
