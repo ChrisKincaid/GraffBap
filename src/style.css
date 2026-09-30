@@ -553,6 +553,7 @@ body.showcase #landing {
 .rb-btn:disabled {
   opacity: 0.4;
   cursor: default;
+  pointer-events: none;
 }
 
 .rb-skip {

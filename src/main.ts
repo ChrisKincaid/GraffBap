@@ -3759,6 +3759,11 @@ function resetReelSel(id: ReelId): void {
   reelSel[id].active = -2;
 }
 
+// Presets and archive hits always carry a piece; yard cars count only once paint is saved.
+function entryPainted(e: RollEntry): boolean {
+  return e.yard === 'preset' || !!e.writer || yardConsists[e.yard][e.index]!.hasPaint;
+}
+
 function renderReelBar(id: ReelId): void {
   const s = reelSel[id];
   const e = s.active >= 0 ? s.entryAt(s.active) : null;
@@ -3841,7 +3846,7 @@ for (const id of ['top', 'sub'] as const) {
     btn.addEventListener('click', () => {
       btn.blur();
       const e = s.entryAt(s.active);
-      if (e) castVote(e, kind, () => {
+      if (e && entryPainted(e)) castVote(e, kind, () => {
         renderReelBar(id);
         popEls(btn);
       });
