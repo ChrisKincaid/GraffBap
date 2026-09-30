@@ -2020,6 +2020,8 @@ let lastCar = { x: 0, y: 0 };
 let carry = 0;
 let hover: { x: number; y: number } | null = null;
 let lineOrigin: { x: number; y: number } | null = null;
+let straightLineTool = false;
+let straightLineGesture = false;
 let lastShot = 0;
 
 // ---------- Two-finger touch navigation ----------
@@ -2033,6 +2035,7 @@ function cancelStroke(): void {
   strokeCtx.globalAlpha = 1;
   strokeCtx.clearRect(0, 0, CAR_WIDTH, CAR_HEIGHT);
   lineOrigin = null;
+  straightLineGesture = false;
   drips.length = 0;
   if (mode === 'paint' && strokeTouched) {
     const s = car().undo.pop();
@@ -2173,8 +2176,14 @@ viewport.addEventListener('pointerdown', (e) => {
     strokeCtx.fillStyle = brush.color;
     strokeCtx.strokeStyle = brush.color;
     if (brush.tool === 'paintball') lastShot = performance.now();
-    stampAt(x, y);
-    if (brush.tool === 'spray') startHiss(brush.opacity);
+    straightLineGesture = straightLineTool;
+    if (!straightLineGesture) {
+      stampAt(x, y);
+      if (brush.tool === 'spray') startHiss(brush.opacity);
+    } else {
+      lineOrigin = { x, y };
+      hover = { x: e.clientX, y: e.clientY };
+    }
     if (e.shiftKey) lineOrigin = { x, y };
     dirty = true;
   } else {
@@ -2212,8 +2221,8 @@ viewport.addEventListener('pointermove', (e) => {
   } else if (mode === 'sketch') {
     for (const ev of e.getCoalescedEvents?.() ?? [e]) sketchTo(...screenToCar(ev.clientX, ev.clientY));
   } else if (mode === 'paint') {
-    if (e.shiftKey) beginLine();
-    else if (lineOrigin) commitLine(...screenToCar(e.clientX, e.clientY));
+    if (!straightLineGesture && e.shiftKey) beginLine();
+    else if (!straightLineGesture && lineOrigin) commitLine(...screenToCar(e.clientX, e.clientY));
     if (!lineOrigin && brush.tool !== 'paintball') {
       for (const ev of e.getCoalescedEvents?.() ?? [e]) {
         const [x, y] = screenToCar(ev.clientX, ev.clientY);
@@ -2239,8 +2248,15 @@ function endPointer(e: PointerEvent): void {
   }
   if (e.pointerId !== activePointer) return;
   if (mode === 'paint') {
-    if (stopHiss()) playPuff();
-    commitLine(...screenToCar(e.clientX, e.clientY));
+    if (straightLineGesture) {
+      stopHiss();
+      commitLine(...screenToCar(e.clientX, e.clientY));
+      straightLineGesture = false;
+      playPuff();
+    } else {
+      if (stopHiss()) playPuff();
+      commitLine(...screenToCar(e.clientX, e.clientY));
+    }
     if (usesStrokeLayer()) commitRoller();
     dirty = true;
     if (strokeTouched) {
@@ -2252,6 +2268,7 @@ function endPointer(e: PointerEvent): void {
   }
   mode = 'none';
   activePointer = -1;
+  straightLineGesture = false;
   paintCtx.globalAlpha = 1;
   updateCursor();
 }
@@ -2907,6 +2924,13 @@ const capButtons = document.querySelectorAll<HTMLButtonElement>('#cap-options bu
 const rollerButtons = document.querySelectorAll<HTMLButtonElement>('#roller-options button');
 const capOptions = document.getElementById('cap-options')!;
 const rollerOptions = document.getElementById('roller-options')!;
+const straightLineToggle = document.getElementById('straight-line-toggle') as HTMLButtonElement;
+
+straightLineToggle.addEventListener('click', () => {
+  straightLineTool = !straightLineTool;
+  straightLineToggle.setAttribute('aria-pressed', String(straightLineTool));
+  straightLineToggle.blur();
+});
 
 function setCap(cap: Cap): void {
   if (YARDS[currentYard].rules.fatOnly && cap !== 'fat') {
@@ -3766,10 +3790,22 @@ const regEntry = (c: RegistryCar): RollEntry | null =>
 type SortMode = FeedSort;
 const SORT_LABEL: Record<SortMode, string> = { top: 'TOP RATED', grave: 'THE GRAVEYARD', random: 'SHUFFLE' };
 
+function yardWeight(yard: YardId | 'preset'): number {
+  if (yard === 'preset') return 1;
+  const rules = YARDS[yard].rules;
+  if (rules.queue || rules.idleMs === 2 * 60_000) return 3;
+  if (rules.burnerMs) return 2.5;
+  if (rules.claim) return 1.5;
+  return 1;
+}
+
 // Net Props (props − toys) ordering for line-ups that don't come from the registry query.
 function sortEntries<T>(items: T[], entryOf: (t: T) => RollEntry, mode: SortMode): T[] {
   const meta = readMeta();
-  const net = (t: T) => entryProps(entryOf(t), meta) - entryToys(entryOf(t), meta);
+  const net = (t: T) => {
+    const e = entryOf(t);
+    return (entryProps(e, meta) - entryToys(e, meta)) * yardWeight(e.yard);
+  };
   if (mode === 'random') {
     for (let i = items.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
@@ -3791,7 +3827,10 @@ interface ReelSel {
   propsBtn: HTMLButtonElement;
   toyBtn: HTMLButtonElement;
   reportBtn: HTMLButtonElement;
+  originEl: HTMLElement;
+  rankBadge: string | null;
 }
+const leaderboardRanks: Record<string, string> = {};
 const reelSel: Record<ReelId, ReelSel> = {
   top: {
     pinned: null,
@@ -3801,6 +3840,8 @@ const reelSel: Record<ReelId, ReelSel> = {
     propsBtn: document.getElementById('sc-props') as HTMLButtonElement,
     toyBtn: document.getElementById('sc-toy') as HTMLButtonElement,
     reportBtn: document.getElementById('sc-report') as HTMLButtonElement,
+    originEl: document.getElementById('sc-origin')!,
+    rankBadge: null,
   },
   sub: {
     pinned: null,
@@ -3810,17 +3851,41 @@ const reelSel: Record<ReelId, ReelSel> = {
     propsBtn: document.getElementById('sub-props') as HTMLButtonElement,
     toyBtn: document.getElementById('sub-toy') as HTMLButtonElement,
     reportBtn: document.getElementById('sub-report') as HTMLButtonElement,
+    originEl: document.getElementById('sub-origin')!,
+    rankBadge: null,
   },
 };
 
 function resetReelSel(id: ReelId): void {
   reelSel[id].pinned = null;
   reelSel[id].active = -2;
+  reelSel[id].rankBadge = null;
 }
 
 // Registry cars, presets and archive hits always carry a piece; yard cars count once paint is saved.
 function entryPainted(e: RollEntry): boolean {
   return !!e.reg || e.yard === 'preset' || !!e.writer || yardConsists[e.yard][e.index]!.hasPaint;
+}
+
+const LOCAL_REPORTS_KEY = 'graffbap_local_reports';
+function hasReported(id: string): boolean {
+  try {
+    const reports = JSON.parse(localStorage.getItem(LOCAL_REPORTS_KEY) ?? '{}') as Record<string, boolean>;
+    return !!reports[`${currentUser?.uid ?? 'guest'}|${id}`];
+  } catch {
+    return false;
+  }
+}
+
+function markReported(id: string): void {
+  let reports: Record<string, boolean> = {};
+  try {
+    reports = JSON.parse(localStorage.getItem(LOCAL_REPORTS_KEY) ?? '{}') as Record<string, boolean>;
+  } catch {
+    reports = {};
+  }
+  reports[`${currentUser?.uid ?? 'guest'}|${id}`] = true;
+  localStorage.setItem(LOCAL_REPORTS_KEY, JSON.stringify(reports));
 }
 
 function renderReelBar(id: ReelId): void {
@@ -3829,7 +3894,7 @@ function renderReelBar(id: ReelId): void {
   const painted = !!e && entryPainted(e);
   s.propsBtn.disabled = !painted;
   s.toyBtn.disabled = !painted;
-  s.reportBtn.disabled = !e?.reg;
+  s.reportBtn.disabled = !e || !painted || (!!e.reg && hasReported(e.reg.id));
   const [pc, tc] = [s.propsBtn, s.toyBtn].map((b) => b.querySelector('.rb-count')!);
   if (!e || !painted) {
     s.activeEl.textContent = e ? `ACTIVE: CLEAN STEEL (Car #${e.index + 1})` : 'ACTIVE: —';
@@ -3837,16 +3902,29 @@ function renderReelBar(id: ReelId): void {
     tc!.textContent = '–';
     s.propsBtn.setAttribute('aria-pressed', 'false');
     s.toyBtn.setAttribute('aria-pressed', 'false');
+    s.originEl.textContent = '';
+    s.originEl.className = 'rb-origin';
+    s.originEl.removeAttribute('title');
+    s.reportBtn.textContent = 'Report';
     return;
   }
   const meta = readMeta();
   const hof = e.reg?.status === 'hall_of_fame' ? ' ★ HoF' : '';
   s.activeEl.textContent = `ACTIVE: ${e.writer || entryWriter(e)} (Car #${e.index + 1})${hof}`;
+  const persistentRank = e ? leaderboardRanks[entryKey(e)] : undefined;
+  const [medal = 'NOT RATED', ...words] = (s.rankBadge ?? persistentRank ?? 'NOT RATED').split(' · ');
+  s.originEl.textContent = medal;
+  s.originEl.className = `rb-origin rank-badge rank-${medal.toLowerCase().replaceAll(' ', '-')}`;
+  const rankText = s.rankBadge ?? persistentRank;
+  s.originEl.title = rankText ? words.join(' · ') : 'This car has not placed on a leaderboard.';
+  s.originEl.setAttribute('aria-label', rankText ?? 'NOT RATED');
   pc!.textContent = String(entryProps(e, meta));
   tc!.textContent = String(entryToys(e, meta));
   const mine = myVote(entryKey(e));
   s.propsBtn.setAttribute('aria-pressed', String(mine === 'props'));
   s.toyBtn.setAttribute('aria-pressed', String(mine === 'toy'));
+  s.reportBtn.textContent = e.reg && hasReported(e.reg.id) ? 'Reported' : 'Report';
+  s.reportBtn.disabled = !!e.reg && hasReported(e.reg.id);
 }
 
 // Resolves the active car (clicked, else nearest the track's middle) and draws its bracket.
@@ -3948,8 +4026,14 @@ function reloadReel(id: ReelId): void {
 
 function reportEntry(e: RollEntry, id: ReelId): void {
   const reg = e.reg;
-  if (!reg) return;
   if (!currentUser) return requireAuth(() => reportEntry(e, id), true);
+  if (!entryPainted(e)) return;
+  if (!reg) {
+    markReported(entryKey(e));
+    renderReelBar(id);
+    showToast('Report sent – thanks for keeping the line clean.');
+    return;
+  }
   void reportRegistryCar(reg.id, currentUser.uid)
     .then((res) => {
       if (res === 'already') showToast('You already reported this car.');
@@ -3958,6 +4042,8 @@ function reportEntry(e: RollEntry, id: ReelId): void {
         showToast('Car quarantined and pulled from the tracks.');
         reloadReel(id);
       }
+      markReported(reg.id);
+      renderReelBar(id);
     })
     .catch((err) => {
       console.error('Report failed', err);
@@ -4401,8 +4487,8 @@ const presetEntries = (): RollEntry[] =>
 // Top-rated line-up across every yard's local saves, topped up with community presets.
 async function buildMainline(): Promise<RollEntry[]> {
   try {
-    const live = (await listFeed('freight', topSort, MAINLINE_SIZE)).map(regEntry).filter((e): e is RollEntry => !!e);
-    if (live.length) return live;
+    const live = (await listFeed('freight', 'top', 50)).map(regEntry).filter((e): e is RollEntry => !!e);
+    if (live.length) return sortEntries(live, (e) => e, topSort).slice(0, MAINLINE_SIZE);
   } catch (err) {
     console.error('Registry feed failed', err);
   }
@@ -4429,7 +4515,8 @@ function startReel(entries: RollEntry[], title: string, yardLine: boolean): void
 
 async function startMainline(): Promise<void> {
   watchingYard = null;
-  const title = `THE MAINLINE · ${SORT_LABEL[topSort]}`;
+  const order = topSort === 'grave' ? 'LOWEST FIRST' : topSort === 'random' ? 'SHUFFLED' : '';
+  const title = order ? `THE MAINLINE · ${SORT_LABEL[topSort]} · ${order}` : `THE MAINLINE · ${SORT_LABEL[topSort]}`;
   startReel(presetEntries(), title, false);
   const entries = await buildMainline();
   // Only swap in the ranked line-up if the user is still watching the Mainline.
@@ -4455,6 +4542,160 @@ function selectTile(id: DispatchId): void {
   dzCars.textContent = '…';
   void refreshCarCount(id);
 }
+
+const dispatchViewToggle = document.getElementById('dispatch-view-toggle') as HTMLButtonElement;
+const leaderboardToggle = document.getElementById('leaderboard-toggle') as HTMLButtonElement;
+const yardMapPanel = document.querySelector('.yard-map') as HTMLElement;
+const dossierPanel = document.getElementById('dossier')!;
+const leaderboardsPanel = document.getElementById('leaderboards')!;
+const leaderboardLists = {
+  overall: document.getElementById('lb-overall')!,
+  speed: document.getElementById('lb-speed')!,
+  hot: document.getElementById('lb-hot')!,
+  division: document.getElementById('lb-division')!,
+};
+const leaderboardGroups: Record<string, RollEntry[]> = {};
+
+function toggleDispatchView(): void {
+  const showing = !leaderboardsPanel.hidden;
+  leaderboardsPanel.hidden = showing;
+  yardMapPanel.hidden = false;
+  dossierPanel.hidden = !showing;
+  dispatchViewToggle.textContent = showing ? '[ ⇄ Leaderboards ]' : '[ ⇄ Yard Map ]';
+  leaderboardToggle.textContent = showing ? '[ ⇄ Yard Map ]' : '[ ⇄ Leaderboards ]';
+  if (!showing) void refreshLeaderboards();
+}
+dispatchViewToggle.addEventListener('click', toggleDispatchView);
+leaderboardToggle.addEventListener('click', toggleDispatchView);
+
+function leaderboardScore(e: RollEntry): number {
+  const meta = readMeta();
+  return (entryProps(e, meta) - entryToys(e, meta)) * yardWeight(e.yard);
+}
+
+async function cueLeaderboardCar(e: RollEntry, category = 'TOP OVERALL', rank = 0): Promise<void> {
+  if (e.yard === 'preset') return;
+  if (YARDS[e.yard].division === 'freight') {
+    startReel([e], `LEADERBOARD · ${YARDS[e.yard].label.toUpperCase()}`, true);
+    if (roll) {
+      reelSel.top.rankBadge = `${rank === 0 ? 'GOLD' : rank === 1 ? 'SILVER' : rank === 2 ? 'BRONZE' : 'RANKED'} · ${category}`;
+      roll.paused = true;
+      const layout = activeRollLayout(true);
+      roll.x = CAR_WIDTH / 2 - layout.W / (2 * layout.scale);
+      updateRollControls();
+      syncReelAudio();
+    }
+    showcaseCanvas.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    return;
+  }
+  const image = await entryImage(e);
+  subwayReel.started = true;
+  subwayReel.yard = e.yard;
+  subwayReel.entries = [e];
+  subwayReel.images = [image];
+  subwayReel.sx = Number.NaN;
+  subwayReel.paused = true;
+  const subwayWidth = Math.max(1, subwayCanvas.clientWidth);
+  const subwayHeight = Math.max(1, subwayCanvas.clientHeight);
+  const subwayScale = (subwayHeight - 16) / (EXPORT_CROP.h + 10);
+  subwayReel.sx = subwayWidth / 2 - (CAR_WIDTH * subwayScale) / 2;
+  resetReelSel('sub');
+  reelSel.sub.rankBadge = `${rank === 0 ? 'GOLD' : rank === 1 ? 'SILVER' : rank === 2 ? 'BRONZE' : 'RANKED'} · ${category}`;
+  renderSubControls();
+  syncReelAudio();
+  subwayTitle.textContent = `LEADERBOARD · ${YARDS[e.yard].label.toUpperCase()}`;
+  subwayCanvas.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function paintLeaderboard(list: HTMLElement, cars: RollEntry[], category: string): void {
+  list.replaceChildren(
+    ...cars.slice(0, 5).map((e, rank) => {
+      const medal = rank === 0 ? 'GOLD' : rank === 1 ? 'SILVER' : rank === 2 ? 'BRONZE' : null;
+      if (medal) leaderboardRanks[entryKey(e)] ??= `${medal} · ${category}`;
+      const item = document.createElement('li');
+      const score = document.createElement('span');
+      score.textContent = `${Math.round(leaderboardScore(e))} net`;
+      const label = `${e.writer || entryWriter(e) || 'Anonymous'} · ${YARDS[e.yard as YardId]?.label ?? 'Community'}`;
+      item.textContent = `${label} `;
+      item.append(score);
+      item.title = `${label} · ${score.textContent}`;
+      item.addEventListener('click', () => void cueLeaderboardCar(e, category, rank));
+      return item;
+    }),
+  );
+}
+
+async function cueLeaderboardGroup(group: string): Promise<void> {
+  const entries = [...(leaderboardGroups[group] ?? [])].sort((a, b) => leaderboardScore(b) - leaderboardScore(a));
+  const freight = entries.filter((e) => e.yard !== 'preset' && YARDS[e.yard].division === 'freight');
+  const subway = entries.filter((e) => e.yard !== 'preset' && YARDS[e.yard].division === 'subway');
+  if (freight.length) {
+    startReel(freight, `LEADERBOARD · ${group.toUpperCase()}`, true);
+    if (roll) {
+      roll.paused = false;
+      updateRollControls();
+      syncReelAudio();
+    }
+  }
+  if (subway.length) {
+    subwayReel.started = true;
+    subwayReel.yard = subway[0]!.yard as YardId;
+    subwayReel.entries = subway;
+    subwayReel.images = await Promise.all(subway.map(entryImage));
+    subwayReel.sx = Number.NaN;
+    subwayReel.paused = false;
+    resetReelSel('sub');
+    renderSubControls();
+    syncReelAudio();
+    subwayTitle.textContent = `LEADERBOARD · ${group.toUpperCase()}`;
+  }
+}
+
+async function refreshLeaderboards(): Promise<void> {
+  try {
+    for (const key of Object.keys(leaderboardRanks)) delete leaderboardRanks[key];
+    const activeYards = (Object.keys(YARDS) as YardId[]).filter((y) => {
+      const rules = YARDS[y].rules;
+      return rules.claim || rules.queue || !!rules.burnerMs || !!rules.gauge;
+    });
+    await Promise.all(activeYards.flatMap((y) => Array.from({ length: CAR_COUNT }, (_, i) => fetchLocal(y, i))));
+    const local = activeYards.flatMap((y) =>
+      yardConsists[y].flatMap((c, index) =>
+        c.hasPaint ? [{ yard: y, index, writer: 'Anonymous Freight', props: readMeta()[localKey(y, index)]?.props ?? 0 }] : [],
+      ),
+    );
+    let registry: RollEntry[] = [];
+    try {
+      const [freight, subway] = await Promise.all([listFeed('freight', 'top', 50), listFeed('subway', 'top', 50)]);
+      registry = [...freight, ...subway].map(regEntry).filter((e): e is RollEntry => !!e);
+    } catch (err) {
+      console.error('Registry leaderboard feed failed', err);
+    }
+    const all = [...registry, ...local].sort((a, b) => leaderboardScore(b) - leaderboardScore(a));
+    const speed = all.filter((e) => {
+      const rules = YARDS[e.yard as YardId]?.rules;
+      return !!rules && (rules.queue || rules.idleMs === 2 * 60_000);
+    });
+    const hot = all.filter((e) => !!YARDS[e.yard as YardId]?.rules.burnerMs);
+    const division = all.slice();
+    leaderboardGroups.overall = all;
+    leaderboardGroups.speed = speed;
+    leaderboardGroups.hot = hot;
+    leaderboardGroups.division = division;
+    paintLeaderboard(leaderboardLists.overall, all, 'TOP OVERALL');
+    paintLeaderboard(leaderboardLists.speed, speed, 'TOP SPEED');
+    paintLeaderboard(leaderboardLists.hot, hot, 'TOP 5-MIN');
+    paintLeaderboard(leaderboardLists.division, division, 'FREIGHT VS SUBWAY');
+  } catch (err) {
+    console.error('Leaderboard load failed', err);
+  }
+}
+
+void refreshLeaderboards();
+
+document.querySelectorAll<HTMLButtonElement>('.lb-head').forEach((button) => {
+  button.addEventListener('click', () => void cueLeaderboardGroup(button.dataset.leaderboard ?? 'overall'));
+});
 
 yardTiles.forEach((t) => t.addEventListener('click', () => selectTile(t.dataset.yard as DispatchId)));
 dzBomb.addEventListener('click', () => {
@@ -4980,8 +5221,11 @@ subSkipBox.checked = localStorage.getItem(SUB_SKIP_KEY) === '1';
 // Public subway archives (plus this device's saves), ranked by props then most recent hit.
 async function buildSubwayLine(): Promise<{ entries: RollEntry[]; images: (CanvasImageSource | null)[] }> {
   try {
-    const live = (await listFeed('subway', subSort, SUBWAY_LINE_SIZE)).map(regEntry).filter((e): e is RollEntry => !!e);
-    if (live.length) return { entries: live, images: await Promise.all(live.map(entryImage)) };
+    const live = (await listFeed('subway', 'top', 50)).map(regEntry).filter((e): e is RollEntry => !!e);
+    if (live.length) {
+      const sorted = sortEntries(live, (e) => e, subSort).slice(0, SUBWAY_LINE_SIZE);
+      return { entries: sorted, images: await Promise.all(sorted.map(entryImage)) };
+    }
   } catch (err) {
     console.error('Registry feed failed', err);
   }
