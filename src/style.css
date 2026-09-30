@@ -676,24 +676,36 @@ body.showcase #landing {
 .dispatch {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+  grid-template-rows: minmax(0, 1fr);
   gap: 10px;
-  align-items: start;
+  align-items: stretch;
   width: min(1400px, 96vw);
+  height: clamp(240px, 30vh, 320px);
+  min-height: 240px;
+  box-sizing: border-box;
 }
 
 .yard-map,
 #dossier {
+  min-height: 0;
   padding: 8px 12px;
   border: 1px solid #2c2f36;
   border-radius: 6px;
   background: rgba(18, 19, 23, 0.9);
 }
 
+#dossier {
+  overflow-y: auto;
+}
+
 .yard-map {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: auto auto repeat(2, minmax(0, 1fr));
   gap: 6px;
-  align-content: start;
+  align-content: stretch;
+  height: 100%;
+  box-sizing: border-box;
 }
 
 .yard-map .map-title {
@@ -703,6 +715,7 @@ body.showcase #landing {
 @media (max-width: 560px) {
   .yard-map {
     grid-template-columns: 1fr;
+    grid-template-rows: auto auto repeat(6, minmax(44px, 1fr));
   }
 }
 
@@ -724,7 +737,9 @@ body.showcase #landing {
   border-radius: 6px;
   background: #1b1d22;
   color: #e8e6e1;
-  text-align: left;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
   cursor: pointer;
 }
 
@@ -834,17 +849,24 @@ body.showcase #landing {
 .dz-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: 6px;
+  margin: 2px 0 8px;
 }
 
 .dz-actions .cta {
-  font-size: 15px;
-  padding: 12px 18px;
+  margin-top: 0;
+  padding: 7px 10px;
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  box-shadow: 2px 2px 0 #111;
 }
 
 @media (max-width: 900px) {
   .dispatch {
     grid-template-columns: 1fr;
+    grid-template-rows: repeat(2, minmax(0, 1fr));
+    height: clamp(460px, 70vh, 640px);
+    min-height: 460px;
   }
 
   .term-link {
