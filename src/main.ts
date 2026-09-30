@@ -3347,6 +3347,7 @@ interface RollEntry {
   props: number;
   // Set for departed cars from the global registry (image, status and votes live there).
   reg?: RegistryCar;
+  archiveImage?: string;
 }
 
 const rollCount = (r: RollState) => r.entries?.length ?? CAR_COUNT;
@@ -3433,6 +3434,8 @@ async function entryImage(e: RollEntry): Promise<CanvasImageSource | null> {
     let img: CanvasImageSource | null = null;
     if (e.reg) {
       img = await rollBitmap(await decodeDataUrl(e.reg.image));
+    } else if (e.archiveImage) {
+      img = await rollBitmap(await decodeDataUrl(e.archiveImage));
     } else if (e.yard === 'preset') {
       img = presetPiece(e.index);
     } else {
@@ -4608,6 +4611,13 @@ async function cueLeaderboardCar(e: RollEntry, category = 'TOP OVERALL', rank = 
 }
 
 function paintLeaderboard(list: HTMLElement, cars: RollEntry[], category: string): void {
+  if (!cars.length) {
+    const empty = document.createElement('li');
+    empty.textContent = 'No ranked cars yet';
+    empty.className = 'lb-empty';
+    list.replaceChildren(empty);
+    return;
+  }
   list.replaceChildren(
     ...cars.slice(0, 5).map((e, rank) => {
       const medal = rank === 0 ? 'GOLD' : rank === 1 ? 'SILVER' : rank === 2 ? 'BRONZE' : null;
@@ -4664,6 +4674,25 @@ async function refreshLeaderboards(): Promise<void> {
         c.hasPaint ? [{ yard: y, index, writer: 'Anonymous Freight', props: readMeta()[localKey(y, index)]?.props ?? 0 }] : [],
       ),
     );
+    const publicCars = await Promise.all(
+      activeYards
+        .filter((y) => !!YARDS[y].publicId)
+        .map(async (y) => {
+          try {
+            const cars = await listPublicYardCars(YARDS[y].publicId!);
+            return cars.map((carData) => ({
+              yard: y,
+              index: carData.index,
+              writer: carData.data.lastWriter || 'Anonymous',
+              props: 0,
+              archiveImage: carData.data.carDataUrl,
+            } as RollEntry));
+          } catch (err) {
+            console.error(`Public leaderboard read failed for ${y}`, err);
+            return [] as RollEntry[];
+          }
+        }),
+    );
     let registry: RollEntry[] = [];
     try {
       const [freight, subway] = await Promise.all([listFeed('freight', 'top', 50), listFeed('subway', 'top', 50)]);
@@ -4671,7 +4700,9 @@ async function refreshLeaderboards(): Promise<void> {
     } catch (err) {
       console.error('Registry leaderboard feed failed', err);
     }
-    const all = [...registry, ...local].sort((a, b) => leaderboardScore(b) - leaderboardScore(a));
+    const known = new Set([...registry, ...local].map((e) => entryKey(e)));
+    const publicFallback = publicCars.flat().filter((e) => !known.has(entryKey(e)));
+    const all = [...registry, ...local, ...publicFallback].sort((a, b) => leaderboardScore(b) - leaderboardScore(a));
     const speed = all.filter((e) => {
       const rules = YARDS[e.yard as YardId]?.rules;
       return !!rules && (rules.queue || rules.idleMs === 2 * 60_000);
