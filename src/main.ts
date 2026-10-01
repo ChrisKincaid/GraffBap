@@ -977,15 +977,20 @@ function dab(x: number, y: number): void {
 // ---------- Tools ----------
 const TAU = Math.PI * 2;
 const ROLLER_THICK = 6;
-const PAINTBALL_INTERVAL = 70;
 let sprayAlpha = 1;
 let rollerBounds = { minX: 0, maxX: 0, maxY: 0 };
 let rollerStreaks: CanvasPattern | null = null;
+// Radians; 0 is the classic horizontal barrel.
+let rollerAngle = 0;
+let paintballAuto = false;
+// Auto fire rate rides the Hard slider: 1 shot/s at the left, 8 shots/s at the right.
+const paintballInterval = () => 1000 / (1 + brush.hardness * 7);
 
 const sizeT = () => (brush.size - 2) / 148;
-// Car space runs ~20 units to the inch, so the size slider spans a 6" to 36" roller.
-const rollerWidth = () => 120 + sizeT() * 600;
-const mopNib = () => 4 + sizeT() * 36;
+// Car space runs ~20 units to the inch, so the size slider spans a 3" to 36" roller.
+const rollerWidth = () => 60 + sizeT() * 660;
+// Exponential so the low end stays marker-fine while the top nearly fills the car's height.
+const mopNib = () => 4 * Math.pow((BODY.h * 0.9) / 4, sizeT());
 const chiselWidth = () => 6 + sizeT() * 54;
 
 // Stroke-layer tools are composited once on release, which is where sheen and glaze hook in.
@@ -1115,68 +1120,71 @@ function sketchTo(x: number, y: number): void {
   sketchLast = { x, y };
 }
 // ---------- Stencils (editor-only masks) ----------
-type StencilKind = 'diamond' | 'stripes' | 'star' | 'target' | 'text' | 'bar';
+type StencilKind = 'text' | 'bar' | 'stripes' | 'target' | 'shape';
 interface Stencil {
   kind: StencilKind;
+  // Index into STAMPS when kind is 'shape'.
+  shape: number;
+  // Index into STENCIL_FONTS when kind is 'text'.
+  font: number;
   x: number;
   y: number;
   size: number;
   invert: boolean;
   text: string;
-  // Half-extents of the Bar cutout, stretched independently.
-  bw: number;
-  bh: number;
   // Radians, clockwise around (x, y).
   angle: number;
 }
 // Sheet margin around the Bar cutout.
 const BAR_MARGIN = 30;
-// Rotate knob distance above the sheet's top edge, in screen px.
-const ROT_KNOB_PX = 40;
-const ROT_SNAP = Math.PI / 12;
 let stencil: Stencil | null = null;
+// True while the stencil follows the finger; HOLD turns it off so strokes paint through.
 let stencilEdit = false;
-let adjust = { kind: 'move' as 'move' | 'resize' | 'rotate', dx: 0, dy: 0 };
+let adjust = { dx: 0, dy: 0 };
 
-function toStencilLocal(s: Stencil, x: number, y: number): [number, number] {
-  const c = Math.cos(-s.angle);
-  const sn = Math.sin(-s.angle);
-  const dx = x - s.x;
-  const dy = y - s.y;
-  return [dx * c - dy * sn, dx * sn + dy * c];
-}
-
-// Heavy military/crate stencil face from Google Fonts; canvas uses the fallbacks until it loads.
-const STENCIL_FONT = '"Stardos Stencil", "Allerta Stencil", Impact, sans-serif';
+// Google Fonts loaded in index.html; canvas uses the fallbacks until each one arrives.
+const STENCIL_FONTS: [string, number][] = [
+  ['Stardos Stencil', 700],
+  ['Allerta Stencil', 400],
+  ['Permanent Marker', 400],
+  ['Bangers', 400],
+  ['Anton', 400],
+  ['Bebas Neue', 400],
+  ['Black Ops One', 400],
+  ['Rubik Mono One', 400],
+  ['Monoton', 400],
+  ['Creepster', 400],
+  ['Pacifico', 400],
+  ['Lobster', 400],
+  ['Press Start 2P', 400],
+  ['Fredoka', 700],
+  ['Impact', 400],
+  ['Arial Black', 900],
+];
 const stencilFontPx = (s: Stencil) => s.size * 0.6;
+function stencilFont(s: Stencil): string {
+  const [name, weight] = STENCIL_FONTS[s.font] ?? STENCIL_FONTS[0]!;
+  return `${weight} ${stencilFontPx(s)}px "${name}", Impact, sans-serif`;
+}
+const barHalf = (s: Stencil) => ({ bw: s.size * 0.6, bh: Math.max(4, s.size * 0.04) });
 const measureCtx = document.createElement('canvas').getContext('2d')!;
 
 function sheetHalf(s: Stencil): { hw: number; hh: number } {
-  if (s.kind === 'bar') return { hw: s.bw + BAR_MARGIN, hh: s.bh + BAR_MARGIN };
+  if (s.kind === 'bar') {
+    const { bw, bh } = barHalf(s);
+    return { hw: bw + BAR_MARGIN, hh: bh + BAR_MARGIN };
+  }
   if (s.kind !== 'text') return { hw: s.size * 0.6, hh: s.size * 0.6 };
   const f = stencilFontPx(s);
-  measureCtx.font = `700 ${f}px ${STENCIL_FONT}`;
+  measureCtx.font = stencilFont(s);
   return { hw: measureCtx.measureText(s.text).width / 2 + f * 0.3, hh: f * 0.62 };
 }
 
 // Cutout geometry in car space; all shapes fit inside the 1.2×size sheet and are filled even-odd.
 function addStencilShape(p: Path2D, s: Stencil): void {
   const { x, y, size: k } = s;
-  if (s.kind === 'diamond') {
-    const q = k * 0.25;
-    const d = k * 0.22;
-    for (const [ox, oy] of [
-      [0, -q],
-      [q, 0],
-      [0, q],
-      [-q, 0],
-    ] as const) {
-      p.moveTo(x + ox, y + oy - d);
-      p.lineTo(x + ox + d, y + oy);
-      p.lineTo(x + ox, y + oy + d);
-      p.lineTo(x + ox - d, y + oy);
-      p.closePath();
-    }
+  if (s.kind === 'shape') {
+    p.addPath(stampPaths[s.shape] ?? stampPaths[0]!, new DOMMatrix().translate(x, y).scale(k * 0.5));
   } else if (s.kind === 'stripes') {
     const h = k * 0.25;
     const w = k * 0.12;
@@ -1188,16 +1196,9 @@ function addStencilShape(p: Path2D, s: Stencil): void {
       p.lineTo(b + 2 * h, y - h);
       p.closePath();
     }
-  } else if (s.kind === 'star') {
-    for (let i = 0; i < 10; i++) {
-      const a = -Math.PI / 2 + (i * Math.PI) / 5;
-      const r = i % 2 ? k * 0.2 : k * 0.5;
-      if (i === 0) p.moveTo(x + Math.cos(a) * r, y + Math.sin(a) * r);
-      else p.lineTo(x + Math.cos(a) * r, y + Math.sin(a) * r);
-    }
-    p.closePath();
   } else if (s.kind === 'bar') {
-    p.rect(x - s.bw, y - s.bh, s.bw * 2, s.bh * 2);
+    const { bw, bh } = barHalf(s);
+    p.rect(x - bw, y - bh, bw * 2, bh * 2);
   } else {
     p.moveTo(x + k * 0.42, y);
     p.arc(x, y, k * 0.42, 0, TAU);
@@ -1233,7 +1234,7 @@ function markStencilChanged(): void {
 // Fills (or outlines) the cutout in the stencil's local frame: origin at center, unrotated.
 function paintShapeLocal(ctx: CanvasRenderingContext2D, s: Stencil, outline = false): void {
   if (s.kind === 'text') {
-    ctx.font = `700 ${stencilFontPx(s)}px ${STENCIL_FONT}`;
+    ctx.font = stencilFont(s);
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     if (outline) ctx.strokeText(s.text, 0, 0);
@@ -1369,51 +1370,18 @@ function ensureFilm(): void {
   filmBox = { x: s.x - ex, y: s.y - ey, w: ex * 2, h: ey * 2 };
 }
 
-void document.fonts?.load(`700 100px "Stardos Stencil"`).then(() => {
-  if (stencil?.kind === 'text') markStencilChanged();
-});
-
+// Before HOLD, a touch anywhere drags the stencil along with the finger.
 function tryBeginAdjust(sx: number, sy: number): boolean {
+  if (!stencil || !stencilEdit) return false;
   const [x, y] = screenToCar(sx, sy);
-  if (stencil && stencilEdit) {
-    const { hw, hh } = sheetHalf(stencil);
-    const hs = 14 / cam.scale;
-    const [lx, ly] = toStencilLocal(stencil, x, y);
-    if (Math.hypot(lx, ly + hh + ROT_KNOB_PX / cam.scale) < hs) {
-      adjust = { kind: 'rotate', dx: 0, dy: 0 };
-      return true;
-    }
-    if (Math.abs(lx - hw) < hs && Math.abs(ly - hh) < hs) {
-      adjust = { kind: 'resize', dx: 0, dy: 0 };
-      return true;
-    }
-    if (Math.abs(lx) < hw && Math.abs(ly) < hh) {
-      adjust = { kind: 'move', dx: x - stencil.x, dy: y - stencil.y };
-      return true;
-    }
-  }
-  return false;
+  adjust = { dx: x - stencil.x, dy: y - stencil.y };
+  return true;
 }
 
-function dragAdjust(x: number, y: number, snap: boolean): void {
-  if (stencil && adjust.kind === 'move') {
-    stencil.x = x - adjust.dx;
-    stencil.y = y - adjust.dy;
-  } else if (stencil && adjust.kind === 'rotate') {
-    // Knob sits straight above center, so pointing up (-90°) means 0 rotation.
-    const a = Math.atan2(y - stencil.y, x - stencil.x) + Math.PI / 2;
-    stencil.angle = snap ? Math.round(a / ROT_SNAP) * ROT_SNAP : a;
-  } else if (stencil?.kind === 'bar') {
-    const [lx, ly] = toStencilLocal(stencil, x, y);
-    stencil.bw = Math.max(8, Math.min(2000, Math.abs(lx) - BAR_MARGIN));
-    stencil.bh = Math.max(3, Math.min(600, Math.abs(ly) - BAR_MARGIN));
-  } else if (stencil) {
-    // Scale so the dragged corner follows the cursor, for square and text sheets alike.
-    const { hw, hh } = sheetHalf(stencil);
-    const [lx, ly] = toStencilLocal(stencil, x, y);
-    const f = Math.max(Math.abs(lx) / hw, Math.abs(ly) / hh);
-    stencil.size = Math.max(60, Math.min(1400, stencil.size * f));
-  }
+function dragAdjust(x: number, y: number): void {
+  if (!stencil) return;
+  stencil.x = x - adjust.dx;
+  stencil.y = y - adjust.dy;
   markStencilChanged();
 }
 
@@ -1435,22 +1403,8 @@ function drawStencil(ctx: CanvasRenderingContext2D): void {
   ctx.rotate(s.angle);
   ctx.strokeStyle = 'rgba(255,255,255,0.7)';
   ctx.setLineDash([8 / cam.scale, 6 / cam.scale]);
+  ctx.lineWidth = 2 / cam.scale;
   ctx.strokeRect(-hw, -hh, hw * 2, hh * 2);
-  ctx.setLineDash([]);
-  const hs = 10 / cam.scale;
-  ctx.fillStyle = '#fff';
-  ctx.fillRect(hw - hs, hh - hs, hs * 2, hs * 2);
-  const knobY = -hh - ROT_KNOB_PX / cam.scale;
-  ctx.beginPath();
-  ctx.moveTo(0, -hh);
-  ctx.lineTo(0, knobY);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.arc(0, knobY, 9 / cam.scale, 0, TAU);
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(0,0,0,0.6)';
-  ctx.lineWidth = 1.5 / cam.scale;
-  ctx.stroke();
   ctx.restore();
 }
 
@@ -1470,34 +1424,14 @@ function kraftPattern(ctx: CanvasRenderingContext2D): CanvasPattern {
   return kraft;
 }
 
-// Stencil action pill: centered below the sheet, flipping above (or clamping) near the bottom.
-function positionStencilHud(): void {
-  if (!stencil) return;
-  const { ey } = sheetExtents(stencil);
-  const w = stencilHud.offsetWidth;
-  const h = stencilHud.offsetHeight;
-  const gap = 18;
-  const sx = cam.x + stencil.x * cam.scale;
-  let bottomEdge = cam.y + (stencil.y + ey) * cam.scale;
-  let topEdge = cam.y + (stencil.y - ey) * cam.scale;
-  if (stencilEdit) {
-    // The rotate knob can end up below the sheet when rotated; keep the pill clear of it either way.
-    const { hh } = sheetHalf(stencil);
-    const d = hh + ROT_KNOB_PX / cam.scale;
-    const ky = cam.y + (stencil.y - Math.cos(stencil.angle) * d) * cam.scale;
-    bottomEdge = Math.max(bottomEdge, ky + 14);
-    topEdge = Math.min(topEdge, ky - 14);
-  }
-  // Stay above the dock when it's showing.
-  const dockTop = document.body.classList.contains('rollby') ? window.innerHeight : toolbarEl.getBoundingClientRect().top;
-  const floor = Math.min(window.innerHeight, dockTop) - 8;
-  let y = bottomEdge + gap;
-  if (y + h > floor) {
-    const above = topEdge - gap - h;
-    y = above >= 8 ? above : floor - h;
-  }
-  stencilHud.style.left = `${Math.min(window.innerWidth - w - 8, Math.max(8, sx - w / 2))}px`;
-  stencilHud.style.top = `${Math.max(8, y)}px`;
+// Middle of what's on screen, kept on the car body; where new stamps and stencils appear.
+function viewCentre(): { x: number; y: number } {
+  const r = paintRegion();
+  const [x, y] = screenToCar(window.innerWidth / 2, (r.top + r.bottom) / 2);
+  return {
+    x: Math.min(BODY.x + BODY.w, Math.max(BODY.x, x)),
+    y: Math.min(BODY.y + BODY.h, Math.max(BODY.y, y)),
+  };
 }
 
 // ---------- Yard Buff eraser ----------
@@ -1679,14 +1613,12 @@ function markTouch(x0: number, y0: number, x1: number, y1: number): boolean {
 function stampAt(x: number, y: number): void {
   if (!markTouch(x, y, x, y)) return;
   if (brush.tool === 'spray') {
-    const flow = sprayFlow();
-    if (flow <= 0) return;
-    strokeCtx.globalAlpha = sprayAlpha * flow;
+    strokeCtx.globalAlpha = sprayAlpha;
     dab(x, y);
     if (brush.cap === 'fat') {
       // Dusty overspray speckle around the fat-cap halo.
       const R = stamp.width / 2;
-      strokeCtx.globalAlpha = Math.min(1, sprayAlpha * 2 * flow);
+      strokeCtx.globalAlpha = Math.min(1, sprayAlpha * 2);
       strokeCtx.fillStyle = brush.color;
       for (let i = 0; i < 3; i++) {
         const a = Math.random() * TAU;
@@ -1698,19 +1630,21 @@ function stampAt(x: number, y: number): void {
     lastDabAt = performance.now();
     addWetness(x, y);
   } else if (brush.tool === 'roller') {
-    // Extension-pole roller: barrel is always horizontal, so vertical drags fill broad columns.
+    // Extension-pole roller: barrel turned by the rotate slider; drags across it fill broad bands.
     const w = rollerWidth();
-    const left = x - w / 2;
-    const top = y - ROLLER_THICK / 2;
-    strokeCtx.fillRect(left, top, w, ROLLER_THICK);
+    strokeCtx.save();
+    strokeCtx.translate(x, y);
+    strokeCtx.rotate(rollerAngle);
+    strokeCtx.fillRect(-w / 2, -ROLLER_THICK / 2, w, ROLLER_THICK);
     if (rollerStreaks) {
-      rollerStreaks.setTransform(new DOMMatrix().translate(left, 0));
+      rollerStreaks.setTransform(new DOMMatrix().translate(-w / 2, 0));
       strokeCtx.globalCompositeOperation = 'destination-out';
       strokeCtx.fillStyle = rollerStreaks;
-      strokeCtx.fillRect(left, top, w, ROLLER_THICK);
+      strokeCtx.fillRect(-w / 2, -ROLLER_THICK / 2, w, ROLLER_THICK);
       strokeCtx.globalCompositeOperation = 'source-over';
       strokeCtx.fillStyle = brush.color;
     }
+    strokeCtx.restore();
     rollerBounds.minX = Math.min(rollerBounds.minX, x);
     rollerBounds.maxX = Math.max(rollerBounds.maxX, x);
     rollerBounds.maxY = Math.max(rollerBounds.maxY, y);
@@ -1738,7 +1672,7 @@ function stampAt(x: number, y: number): void {
       spawnDrip(
         x + (Math.random() - 0.5) * d * 0.4,
         y + d * 0.3,
-        mopNib() * (0.3 + Math.random() * 0.3),
+        Math.min(24, mopNib() * (0.3 + Math.random() * 0.3)),
         (40 + Math.random() * 180) * (0.4 + mopFlow),
         brush.color,
         Math.min(1, brush.opacity * 1.1),
@@ -1956,7 +1890,7 @@ const BODY_PAD = 40;
 const shown = (el: HTMLElement | null): el is HTMLElement => !!el && el.getClientRects().length > 0;
 function paintRegion(): { top: number; bottom: number } {
   let top = 8;
-  for (const id of ['yard-bar', 'yard-hud']) {
+  for (const id of ['yard-bar']) {
     const el = document.getElementById(id);
     if (shown(el)) top = Math.max(top, el.getBoundingClientRect().bottom + 8);
   }
@@ -2235,7 +2169,7 @@ viewport.addEventListener('pointerdown', (e) => {
     dirty = true;
     return;
   } else if (e.button === 0) {
-    if (locked()) return;
+    if (locked() || blockedByCarLimit()) return;
     mode = 'paint';
     yardStrokeStart();
     strokeTouched = false;
@@ -2300,7 +2234,7 @@ viewport.addEventListener('pointermove', (e) => {
     camAnim = null;
   } else if (mode === 'adjust') {
     const [ax, ay] = screenToCar(e.clientX, e.clientY);
-    dragAdjust(ax, ay, e.shiftKey);
+    dragAdjust(ax, ay);
   } else if (mode === 'sketch') {
     for (const ev of e.getCoalescedEvents?.() ?? [e]) sketchTo(...screenToCar(ev.clientX, ev.clientY));
   } else if (mode === 'paint') {
@@ -2638,55 +2572,74 @@ flashBtn.addEventListener('click', () => {
 });
 
 const stencilBtn = document.getElementById('stencil-btn') as HTMLButtonElement;
-const stencilMenu = document.getElementById('stencil-menu')!;
-const stencilKindBtns = document.querySelectorAll<HTMLButtonElement>('#stencil-menu [data-stencil]');
-const stencilInvertBtn = document.getElementById('stencil-invert') as HTMLButtonElement;
-const stencilAdjustBtn = document.getElementById('stencil-adjust') as HTMLButtonElement;
-const stencilBakeBtn = document.getElementById('stencil-bake') as HTMLButtonElement;
-const stencilHud = document.getElementById('stencil-hud')!;
-const toolbarEl = document.getElementById('toolbar')!;
-const hudAdjustBtn = document.getElementById('hud-adjust') as HTMLButtonElement;
-const hudInvertBtn = document.getElementById('hud-invert') as HTMLButtonElement;
-const stencilTextInput = document.getElementById('stencil-text') as HTMLInputElement;
 
-function stencilTextValue(): string {
-  return (
-    stencilTextInput.value
-      .toUpperCase()
-      .replace(/[^A-Z0-9 .!-]/g, '')
-      .slice(0, 12)
-      .trim() || 'TAG'
-  );
+// Tool extras: the settings rows that slide out above the dock. Only one shows at a time.
+type Extra = 'stamp' | 'stencil' | 'roller' | 'paintball';
+let openExtra: Extra | null = null;
+function showExtra(name: Extra | null): void {
+  openExtra = name;
+  document.querySelectorAll<HTMLElement>('#toolbar .tool-extra').forEach((el) => {
+    el.hidden = el.dataset.extra !== name;
+  });
+  // A stencil whose controls are tucked away stays pinned so it can't wander under the finger.
+  if (name !== 'stencil' && stencil && stencilEdit) {
+    stencilEdit = false;
+    updateStencilUI();
+  }
 }
+const stencilKindSelect = document.getElementById('stencil-kind') as HTMLSelectElement;
+const stencilFontSelect = document.getElementById('stencil-font') as HTMLSelectElement;
+const stencilTextInput = document.getElementById('stencil-text') as HTMLInputElement;
+const stencilSizeInput = document.getElementById('stencil-size') as HTMLInputElement;
+const stencilRotateInput = document.getElementById('stencil-rotate') as HTMLInputElement;
+const stencilHoldBtn = document.getElementById('stencil-hold') as HTMLButtonElement;
 
-stencilTextInput.addEventListener('input', () => {
-  if (stencil?.kind !== 'text') return;
-  stencil.text = stencilTextValue();
-  markStencilChanged();
+STENCIL_FONTS.forEach(([name], i) => {
+  const o = new Option(name, String(i));
+  o.style.fontFamily = `"${name}"`;
+  stencilFontSelect.add(o);
 });
 
+// Exponential so small sizes stay fine-grained while the top end covers more than the whole car.
+const stencilSizeValue = () => 60 * Math.pow((BODY.w * 1.3) / 60, Number(stencilSizeInput.value) / 100);
+
+// Copies the row's controls onto the live stencil.
+function syncStencil(): void {
+  if (!stencil) return;
+  const v = stencilKindSelect.value;
+  stencil.kind = v.startsWith('shape:') ? 'shape' : (v as StencilKind);
+  stencil.shape = v.startsWith('shape:') ? Number(v.slice(6)) : 0;
+  stencil.font = Number(stencilFontSelect.value);
+  stencil.text = stencilTextInput.value.trim().slice(0, 24) || 'TAG';
+  stencil.size = stencilSizeValue();
+  stencil.angle = (Number(stencilRotateInput.value) * Math.PI) / 180;
+  if (stencil.kind === 'text') void document.fonts?.load(stencilFont(stencil), stencil.text).then(markStencilChanged);
+  updateStencilUI();
+}
+
 function updateStencilUI(): void {
-  stencilKindBtns.forEach((b) => b.setAttribute('aria-pressed', String(stencil?.kind === b.dataset.stencil)));
-  stencilInvertBtn.setAttribute('aria-pressed', String(!!stencil?.invert));
-  stencilAdjustBtn.setAttribute('aria-pressed', String(stencilEdit));
-  for (const b of [stencilInvertBtn, stencilAdjustBtn, stencilBakeBtn]) b.disabled = !stencil;
-  stencilHud.hidden = !stencil;
-  hudAdjustBtn.textContent = stencilEdit ? 'Done' : 'Move';
-  hudAdjustBtn.setAttribute('aria-pressed', String(stencilEdit));
-  hudInvertBtn.setAttribute('aria-pressed', String(!!stencil?.invert));
+  stencilBtn.setAttribute('aria-pressed', String(!!stencil));
+  const isText = stencil?.kind === 'text';
+  stencilTextInput.hidden = !isText;
+  stencilFontSelect.hidden = !isText;
+  stencilHoldBtn.setAttribute('aria-pressed', String(!!stencil && !stencilEdit));
   markStencilChanged();
 }
 
-function setStencilMenu(open: boolean): void {
-  stencilMenu.hidden = !open;
-  stencilBtn.setAttribute('aria-expanded', String(open));
+function dropStencil(): void {
+  if (mode !== 'none') return;
+  const { x, y } = viewCentre();
+  stencilSizeInput.value = '50';
+  stencil = { kind: 'text', shape: 0, font: 0, x, y, size: 0, invert: false, text: 'TAG', angle: 0 };
+  stencilEdit = true;
+  syncStencil();
 }
 
-// Bake & Peel (button, B, Enter): fill the opening with the current color at the current
-// opacity as one undo step, then lift the stencil.
+// FILL (button, B, Enter): fill the opening with the current color at the current opacity as
+// one undo step. The stencil stays put so it can be filled again or moved on.
 function bakeStencil(): void {
   const s = stencil;
-  if (!s || mode !== 'none' || locked()) return;
+  if (!s || mode !== 'none' || locked() || blockedByCarLimit()) return;
   ensureMask();
   const { hw, hh } = sheetHalf(s);
   const { ex, ey } = sheetExtents(s);
@@ -2708,12 +2661,10 @@ function bakeStencil(): void {
   paintCtx.globalAlpha = brush.opacity;
   paintCtx.drawImage(cv, x0, y0);
   paintCtx.globalAlpha = 1;
-  stencil = null;
-  stencilEdit = false;
-  updateStencilUI();
   car().hasPaint = true;
   updateConsistUI();
   scheduleSave();
+  dirty = true;
 }
 
 // ✕ Peel / Esc: lift the sheet only; whatever was sprayed through stays, no fill is added.
@@ -2722,59 +2673,39 @@ function peelStencil(): void {
   playPeel();
   stencil = null;
   stencilEdit = false;
+  if (openExtra === 'stencil') showExtra(null);
   updateStencilUI();
 }
 
-function toggleStencilEdit(): void {
+// Stencils: drop one, or bring its controls back if they were tucked away; press again to lift it.
+stencilBtn.addEventListener('click', () => {
+  stencilBtn.blur();
+  if (stencil && openExtra === 'stencil') {
+    peelStencil();
+    return;
+  }
+  if (brush.tool === 'stamp') selectTool('spray');
+  if (!stencil) dropStencil();
+  showExtra('stencil');
+});
+stencilKindSelect.addEventListener('change', () => {
+  stencilKindSelect.blur();
+  syncStencil();
+});
+stencilFontSelect.addEventListener('change', () => {
+  stencilFontSelect.blur();
+  syncStencil();
+});
+for (const el of [stencilTextInput, stencilSizeInput, stencilRotateInput]) el.addEventListener('input', syncStencil);
+stencilHoldBtn.addEventListener('click', () => {
+  stencilHoldBtn.blur();
   if (!stencil) return;
   stencilEdit = !stencilEdit;
   updateStencilUI();
-}
-
-stencilBtn.addEventListener('click', () => setStencilMenu(stencilMenu.hidden));
-stencilKindBtns.forEach((b) =>
-  b.addEventListener('click', () => {
-    if (mode !== 'none') return;
-    const kind = b.dataset.stencil as StencilKind;
-    if (stencil) {
-      stencil.kind = kind;
-      stencil.text = stencilTextValue();
-    } else {
-      const [cx, cy] = screenToCar(window.innerWidth / 2, window.innerHeight / 2);
-      stencil = {
-        kind,
-        x: Math.min(BODY.x + BODY.w - 200, Math.max(BODY.x + 200, cx)),
-        y: Math.min(BODY.y + BODY.h - 200, Math.max(BODY.y + 200, cy)),
-        size: 320,
-        invert: false,
-        text: stencilTextValue(),
-        bw: 600,
-        bh: 40,
-        angle: 0,
-      };
-      stencilEdit = true;
-      playPeel();
-    }
-    // Text keeps the picker open for typing; other shapes hand off to the on-stencil action pill.
-    if (kind !== 'text') setStencilMenu(false);
-    updateStencilUI();
-  }),
-);
-function toggleStencilInvert(): void {
-  if (stencil) stencil.invert = !stencil.invert;
-  updateStencilUI();
-}
-
-stencilInvertBtn.addEventListener('click', toggleStencilInvert);
-hudInvertBtn.addEventListener('click', toggleStencilInvert);
-document.getElementById('hud-bake')!.addEventListener('click', bakeStencil);
-stencilAdjustBtn.addEventListener('click', toggleStencilEdit);
-hudAdjustBtn.addEventListener('click', toggleStencilEdit);
-stencilBakeBtn.addEventListener('click', bakeStencil);
-document.getElementById('hud-peel')!.addEventListener('click', peelStencil);
-document.addEventListener('pointerdown', (e) => {
-  const fly = (e.target as Element).closest('.flyout');
-  if (!stencilMenu.hidden && fly !== stencilMenu.parentElement) setStencilMenu(false);
+});
+document.getElementById('stencil-fill')!.addEventListener('click', (e) => {
+  (e.currentTarget as HTMLElement).blur();
+  bakeStencil();
 });
 updateStencilUI();
 
@@ -2790,7 +2721,7 @@ const TOOL_KEYS: Tool[] = ['spray', 'roller', 'mop', 'paintball', 'buff'];
 
 function selectTool(tool: Tool): void {
   if (mode !== 'none') return;
-  document.querySelector<HTMLButtonElement>(`#tools button[data-tool="${tool}"]`)?.click();
+  document.querySelector<HTMLButtonElement>(`#toolbar [data-tool="${tool}"]`)?.click();
 }
 
 const sizeInput = document.getElementById('brush-size') as HTMLInputElement;
@@ -2946,7 +2877,7 @@ document.getElementById('clear-paint')!.addEventListener('click', () => {
   scheduleSave();
 });
 
-const toolButtons = document.querySelectorAll<HTMLButtonElement>('#tools button');
+const toolButtons = document.querySelectorAll<HTMLButtonElement>('#toolbar button[data-tool]');
 toolButtons.forEach((btn) =>
   btn.addEventListener('click', () => {
     brush.tool = btn.dataset.tool as Tool;
@@ -2965,8 +2896,16 @@ straightLineToggle.addEventListener('click', () => {
   straightLineToggle.blur();
 });
 
+const TOOL_EXTRAS: Partial<Record<Tool, Extra>> = { stamp: 'stamp', roller: 'roller', paintball: 'paintball' };
+
 function updateToolOptions(): void {
-  stampOptions.hidden = brush.tool !== 'stamp';
+  if (brush.tool === 'stamp') {
+    stampPos = viewCentre();
+    stampSizeInput.value = '50';
+  }
+  const extra = TOOL_EXTRAS[brush.tool];
+  if (extra) showExtra(extra);
+  else if (openExtra && openExtra !== 'stencil') showExtra(null);
 }
 
 // ---------- Stamps ----------
@@ -3005,9 +2944,9 @@ let stampKind = 0;
 let stampAngle = 0;
 let stampPos: { x: number; y: number } | null = null;
 let stampPointer = -1;
-const stampOptions = document.getElementById('stamp-options')!;
-// Car space is ~20 units to the inch, so the size slider spans a 2" to 30" stamp.
-const stampSize = () => 40 + sizeT() * 560;
+// Exponential: ~2" at the left of the stamp's size slider, bigger than the whole car at the right.
+const stampSizeInput = document.getElementById('stamp-size') as HTMLInputElement;
+const stampSize = () => 40 * Math.pow((BODY.w * 1.5) / 40, Number(stampSizeInput.value) / 100);
 
 function withStamp(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, draw: (p: Path2D) => void): void {
   ctx.save();
@@ -3023,6 +2962,7 @@ function pressStamp(): void {
     if (!stampPos) showNotice('Tap the car to place the stamp');
     return;
   }
+  if (blockedByCarLimit()) return;
   pushHistory();
   paintCtx.globalAlpha = brush.opacity;
   paintCtx.fillStyle = brush.color;
@@ -3038,7 +2978,8 @@ function drawStampPreview(): void {
   if (brush.tool !== 'stamp' || !stampPos) return;
   const r = Math.max(2, (stampSize() / 2) * cam.scale);
   withStamp(viewCtx, cam.x + stampPos.x * cam.scale, cam.y + stampPos.y * cam.scale, r, (p) => {
-    viewCtx.globalAlpha = 0.45;
+    // Faint fill so a pressed stamp clearly shows up underneath the preview.
+    viewCtx.globalAlpha = 0.15;
     viewCtx.fillStyle = brush.color;
     viewCtx.fill(p, 'evenodd');
     viewCtx.globalAlpha = 1;
@@ -3062,7 +3003,10 @@ for (const type of ['pointerup', 'pointercancel'] as const) {
 }
 
 const stampKindSelect = document.getElementById('stamp-kind') as HTMLSelectElement;
-STAMPS.forEach(([name], i) => stampKindSelect.add(new Option(name, String(i))));
+STAMPS.forEach(([name], i) => {
+  stampKindSelect.add(new Option(name, String(i)));
+  stencilKindSelect.add(new Option(name, `shape:${i}`));
+});
 stampKindSelect.addEventListener('change', () => {
   stampKind = Number(stampKindSelect.value);
   stampKindSelect.blur();
@@ -3073,6 +3017,29 @@ stampRotate.addEventListener('input', () => {
   stampAngle = Number(stampRotate.value);
   dirty = true;
 });
+stampSizeInput.addEventListener('input', () => (dirty = true));
+
+const rollerRotate = document.getElementById('roller-rotate') as HTMLInputElement;
+rollerRotate.addEventListener('input', () => {
+  rollerAngle = (Number(rollerRotate.value) * Math.PI) / 180;
+  dirty = true;
+});
+
+const fireBtns = document.querySelectorAll<HTMLButtonElement>('#paintball-options [data-fire]');
+const fireRate = document.getElementById('fire-rate')!;
+function updateFireUI(): void {
+  fireBtns.forEach((b) => b.setAttribute('aria-pressed', String((b.dataset.fire === 'auto') === paintballAuto)));
+  fireRate.textContent = paintballAuto ? `${Math.round(1000 / paintballInterval())} shots/sec · Hard sets speed` : 'One tap, one shot';
+}
+fireBtns.forEach((b) =>
+  b.addEventListener('click', () => {
+    b.blur();
+    paintballAuto = b.dataset.fire === 'auto';
+    updateFireUI();
+  }),
+);
+document.getElementById('brush-hardness')!.addEventListener('input', updateFireUI);
+updateFireUI();
 document.getElementById('stamp-go')!.addEventListener('click', (e) => {
   (e.currentTarget as HTMLElement).blur();
   pressStamp();
@@ -3234,9 +3201,12 @@ function saveNow(body: HTMLCanvasElement = copyBody()): void {
       if (result === 'published') {
         clearTimeout(retryTimer);
         if (uploadFailing) showToast('Back online – your piece is saved');
+        else showToast('Saved ✓');
         uploadFailing = false;
         // Leaving the editor saves on the way out; refresh the line once the piece has landed.
         if (location.hash !== '#yard') reloadReel(YARDS[yard].division === 'subway' ? 'sub' : 'top');
+      } else if (result === 'limit') {
+        showToast(carLimitMessage(), 6000);
       } else {
         scheduleRetry();
         if (!uploadFailing) {
@@ -3247,7 +3217,9 @@ function saveNow(body: HTMLCanvasElement = copyBody()): void {
       saveStatus.textContent =
         result === 'no-account'
           ? 'Saved on this device only'
-          : result === 'failed'
+          : result === 'limit'
+            ? 'Saved on this device – daily car limit reached'
+            : result === 'failed'
             ? 'Saved here – upload failed'
             : currentUser?.isAnonymous
               ? 'Saved · Sign in to keep your pieces'
@@ -3282,7 +3254,45 @@ function rememberPiece(id: string | null): void {
   else localStorage.removeItem(LAST_PIECE_KEY);
 }
 
-type PublishResult = 'published' | 'no-account' | 'failed';
+type PublishResult = 'published' | 'no-account' | 'failed' | 'limit';
+
+// ---------- Daily cap: 20 brand-new cars per rolling 24 hours (per device) ----------
+// Only new pieces count; reopening and re-saving your own piece is never blocked.
+const CAR_LIMIT = 20;
+const CAR_LIMIT_WINDOW_MS = 24 * 60 * 60_000;
+const NEW_CARS_KEY = 'graffbap_new_cars';
+
+function recentNewCars(): number[] {
+  const now = Date.now();
+  try {
+    const raw: unknown = JSON.parse(localStorage.getItem(NEW_CARS_KEY) ?? '[]');
+    if (!Array.isArray(raw)) return [];
+    return raw.filter((t): t is number => typeof t === 'number' && t > now - CAR_LIMIT_WINDOW_MS && t <= now + 60_000);
+  } catch {
+    return [];
+  }
+}
+
+function noteNewCar(): void {
+  try {
+    localStorage.setItem(NEW_CARS_KEY, JSON.stringify([...recentNewCars(), Date.now()]));
+  } catch {
+    // Storage full or blocked: the cap just doesn't apply on this device.
+  }
+}
+
+function carLimitMessage(): string {
+  const oldest = Math.min(...recentNewCars());
+  const hours = Math.max(1, Math.ceil((oldest + CAR_LIMIT_WINDOW_MS - Date.now()) / 3_600_000));
+  return `Sorry – there's a hard limit of ${CAR_LIMIT} cars per 24 hours. Come back in about ${hours} hour${hours === 1 ? '' : 's'} and you'll be good to go.`;
+}
+
+// True (and tells the painter why) when this would start yet another new car past the cap.
+function blockedByCarLimit(): boolean {
+  if (currentPieceId || practiceMode || recentNewCars().length < CAR_LIMIT) return false;
+  showToast(carLimitMessage(), 6000);
+  return true;
+}
 
 async function publishPiece(image: string, createdAt: number): Promise<PublishResult> {
   const user = currentUser ?? (await ensureAnonymous().catch((err) => {
@@ -3296,6 +3306,7 @@ async function publishPiece(image: string, createdAt: number): Promise<PublishRe
       return 'published';
     }
     if (creatingPiece) return 'published';
+    if (recentNewCars().length >= CAR_LIMIT) return 'limit';
     creatingPiece = true;
     try {
       currentPieceId = await registerDeparture({
@@ -3311,6 +3322,7 @@ async function publishPiece(image: string, createdAt: number): Promise<PublishRe
     } finally {
       creatingPiece = false;
     }
+    noteNewCar();
     rememberPiece(currentPieceId);
     return 'published';
   } catch (err) {
@@ -3988,7 +4000,8 @@ function trackSelection(
     s.active = active;
     renderReelBar(id);
   }
-  if (active < 0) return;
+  // Only a clicked car gets marked; cars passing the centre line stay plain.
+  if (active < 0 || s.pinned === null) return;
   const x0 = carX(active) + (BODY.x - 20) * scale;
   const x1 = carX(active) + (BODY.x + BODY.w + 20) * scale;
   const y0 = oy + (BODY.y - 60) * scale;
@@ -4621,7 +4634,7 @@ function startReel(entries: RollEntry[], title: string, yardLine: boolean): void
 }
 
 async function startMainline(): Promise<void> {
-  const title = myWork.top ? 'My Trains' : 'Public Train Yard';
+  const title = myWork.top ? 'My Trains' : 'Train';
   reelDescription.textContent = 'Pulling the line-up…';
   startReel([], title, false);
   const entries = await buildMainline();
@@ -5210,7 +5223,7 @@ function loadSubwayLine(yard: YardId | null): void {
   subwayReel.entries = [];
   subwayReel.images = [];
   subwayReel.sx = Number.NaN;
-  subwayTitle.textContent = myWork.sub ? 'My Subways' : 'Public Subway';
+  subwayTitle.textContent = myWork.sub ? 'My Subways' : 'Subway';
   void (myWork.sub ? buildMySubwayLine() : buildSubwayLine()).then(({ entries, images }) => {
     if (token !== subwayReel.token) return;
     subwayReel.entries = entries;
@@ -5335,19 +5348,10 @@ function renderSubwayReel(now: number): void {
   trackSelection(ctx, 'sub', subwayReel.entries.length, (i) => subwayReel.sx + i * CAR_WIDTH * scale, scale, oy, W);
 }
 
-// ---------- Session: aerosol gauge + the "still working?" idle check ----------
-const yardHud = document.getElementById('yard-hud')!;
-const yhName = document.getElementById('yh-name')!;
-const yhStatus = document.getElementById('yh-status')!;
-const yhGauge = document.getElementById('yh-gauge')!;
-const yhGaugeFill = document.getElementById('yh-gauge-fill')!;
-const GAUGE_REFILL_S = 60;
+// ---------- Session: the "still working?" idle check ----------
 const IDLE_WARN_MS = 9.5 * 60_000;
 const IDLE_EXIT_MS = 10 * 60_000;
-let gauge = 1;
-let gaugeDryNoticed = false;
 let lastActivity = Date.now();
-let lastTick = performance.now();
 
 const clock = (ms: number) => {
   const s = Math.max(0, Math.ceil(ms / 1000));
@@ -5355,8 +5359,6 @@ const clock = (ms: number) => {
 };
 
 function resetYardSession(): void {
-  gauge = 1;
-  gaugeDryNoticed = false;
   markActive();
 }
 
@@ -5365,23 +5367,12 @@ function markActive(): void {
   idleModal.hidden = true;
 }
 
-// Spray output multiplier: a dry can only sputters until the gauge recovers.
-function sprayFlow(): number {
-  return gauge > 0.02 ? 1 : Math.random() < 0.15 ? 0.4 : 0;
-}
-
 function yardStrokeStart(): void {
   markActive();
 }
 
-function yardTick(dt: number): void {
+function yardTick(): void {
   const inYard = location.hash === '#yard';
-  if (mode === 'paint' && brush.tool === 'spray') gauge = Math.max(0, gauge - dt / RULES.gauge);
-  else gauge = Math.min(1, gauge + dt / GAUGE_REFILL_S);
-  if (gauge <= 0.02 && !gaugeDryNoticed) {
-    gaugeDryNoticed = true;
-    showNotice("Can's dry – let it breathe");
-  } else if (gauge > 0.2) gaugeDryNoticed = false;
 
   // Practice holds nothing, so it never gets timed out.
   if (inYard && !roll && !practiceMode) {
@@ -5396,14 +5387,6 @@ function yardTick(dt: number): void {
       idleCountdown.textContent = clock(IDLE_EXIT_MS - idle);
     }
   }
-
-  yardHud.hidden = !inYard || !!roll;
-  if (yardHud.hidden) return;
-  yhName.textContent = YARDS[currentYard].label;
-  yhStatus.textContent = practiceMode ? 'Practice' : currentPieceId ? 'On the line' : 'Spray to start';
-  yhGauge.hidden = false;
-  yhGaugeFill.style.width = `${Math.round(gauge * 100)}%`;
-  yhGauge.classList.toggle('low', gauge < 0.2);
 }
 
 const idleModal = document.getElementById('still-working')!;
@@ -5763,9 +5746,7 @@ function drawFlashlight(): void {
 }
 function render(): void {
   const now = performance.now();
-  const dt = Math.min(0.1, (now - lastTick) / 1000);
-  lastTick = now;
-  yardTick(dt);
+  yardTick();
   if (roll) {
     renderRollBy(now);
     if (roll.showcase) renderSubwayReel(now);
@@ -5791,8 +5772,8 @@ function render(): void {
     dirty = true;
   }
   updateDrips(now);
-  if (mode === 'paint' && brush.tool === 'paintball' && !lineOrigin) {
-    if (now - lastShot >= PAINTBALL_INTERVAL) {
+  if (mode === 'paint' && brush.tool === 'paintball' && paintballAuto && !lineOrigin) {
+    if (now - lastShot >= paintballInterval()) {
       stampAt(...screenToCar(lastScreen.x, lastScreen.y));
       lastShot = now;
       dirty = true;
@@ -5834,10 +5815,7 @@ function render(): void {
     viewCtx.globalCompositeOperation = 'source-over';
     viewCtx.drawImage(fgLayer, 0, 0);
     if (sketchHas) viewCtx.drawImage(sketchLayer, 0, 0);
-    if (stencil) {
-      drawStencil(viewCtx);
-      positionStencilHud();
-    }
+    if (stencil) drawStencil(viewCtx);
 
     viewCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
     if (flashlight) drawFlashlight();
@@ -5873,7 +5851,23 @@ function render(): void {
       } else if (brush.tool === 'roller') {
         const w = rollerWidth() * cam.scale;
         const t = Math.max(4, ROLLER_THICK * 2 * cam.scale);
-        viewCtx.rect(hover.x - w / 2, hover.y - t / 2, w, t);
+        const c = Math.cos(rollerAngle);
+        const s = Math.sin(rollerAngle);
+        const { x: hx, y: hy } = hover;
+        (
+          [
+            [-w / 2, -t / 2],
+            [w / 2, -t / 2],
+            [w / 2, t / 2],
+            [-w / 2, t / 2],
+          ] as const
+        ).forEach(([px, py], i) => {
+          const X = hx + px * c - py * s;
+          const Y = hy + px * s + py * c;
+          if (i) viewCtx.lineTo(X, Y);
+          else viewCtx.moveTo(X, Y);
+        });
+        viewCtx.closePath();
       } else {
         const r = Math.max(3, paintballRadius() * cam.scale);
         viewCtx.arc(hover.x, hover.y, r, 0, TAU);

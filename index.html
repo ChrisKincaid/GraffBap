@@ -29,18 +29,55 @@
     <link rel="icon" type="image/png" href="/Images/Favicon/Can1.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Stardos+Stencil:wght@700&family=Allerta+Stencil&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Stardos+Stencil:wght@700&family=Allerta+Stencil&family=Permanent+Marker&family=Bangers&family=Anton&family=Bebas+Neue&family=Black+Ops+One&family=Rubik+Mono+One&family=Monoton&family=Creepster&family=Pacifico&family=Lobster&family=Press+Start+2P&family=Fredoka:wght@700&display=swap" rel="stylesheet" />
   </head>
   <body>
     <canvas id="viewport"></canvas>
     <div id="toolbar">
-      <div id="stamp-options" class="dock-row" hidden>
+      <div id="stamp-options" class="dock-row tool-extra" data-extra="stamp" hidden>
         <select id="stamp-kind" aria-label="Stamp" title="Pick a stamp"></select>
+        <label class="stamp-rotate" title="Size">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 14v6h6M20 10V4h-6M4 20l7-7M20 4l-7 7"/></svg>
+          <input id="stamp-size" type="range" min="0" max="100" value="50" aria-label="Stamp size" />
+        </label>
         <label class="stamp-rotate" title="Rotate">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5"/></svg>
           <input id="stamp-rotate" type="range" min="0" max="359" value="0" aria-label="Rotate stamp" />
         </label>
         <button id="stamp-go" type="button" title="Paint the stamp where it sits – press again for another">STAMP</button>
+      </div>
+      <div id="stencil-options" class="dock-row tool-extra" data-extra="stencil" hidden>
+        <select id="stencil-kind" aria-label="Stencil" title="Pick a stencil">
+          <option value="text">Text</option>
+          <option value="bar">Bar</option>
+          <option value="stripes">Stripes</option>
+          <option value="target">Target</option>
+        </select>
+        <input id="stencil-text" type="text" maxlength="24" value="TAG" aria-label="Stencil text" autocomplete="off" spellcheck="false" />
+        <select id="stencil-font" aria-label="Font" title="Pick a font"></select>
+        <label class="stamp-rotate" title="Size">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 14v6h6M20 10V4h-6M4 20l7-7M20 4l-7 7"/></svg>
+          <input id="stencil-size" type="range" min="0" max="100" value="50" aria-label="Stencil size" />
+        </label>
+        <label class="stamp-rotate" title="Rotate">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5"/></svg>
+          <input id="stencil-rotate" type="range" min="0" max="359" value="0" aria-label="Rotate stencil" />
+        </label>
+        <button id="stencil-hold" type="button" aria-pressed="false" title="Hold the stencil in place so you can spray through it">HOLD</button>
+        <button id="stencil-fill" type="button" title="Fill the stencil opening with the current colour">FILL</button>
+      </div>
+      <div id="roller-options" class="dock-row tool-extra" data-extra="roller" hidden>
+        <label class="stamp-rotate" title="Rotate">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5"/></svg>
+          <input id="roller-rotate" type="range" min="0" max="179" value="0" aria-label="Rotate roller" />
+        </label>
+      </div>
+      <div id="paintball-options" class="dock-row tool-extra" data-extra="paintball" hidden>
+        <div class="seg" role="group" aria-label="Fire mode">
+          <button type="button" data-fire="single" aria-pressed="true">Single</button>
+          <button type="button" data-fire="auto" aria-pressed="false">Auto</button>
+        </div>
+        <span id="fire-rate" class="extra-note"></span>
       </div>
       <div class="dock-row">
         <div class="cluster" role="group" aria-label="Tools">
@@ -49,7 +86,6 @@
             <button type="button" data-tool="roller" aria-pressed="false" title="Roller (2) – Extension-pole roller for fast vertical block fills">Roller</button>
             <button type="button" data-tool="mop" aria-pressed="false" title="Mop (3) – Squeeze marker; drag slowly for heavy ink and drips">Mop</button>
             <button type="button" data-tool="paintball" aria-pressed="false" title="Paintball (4) – Hold to fire splatter bursts">Paintball</button>
-            <button type="button" data-tool="stamp" aria-pressed="false" title="Stamp – Tap the car to place a shape, then press STAMP">Stamp</button>
             <button type="button" data-tool="buff" aria-pressed="false" title="Buff (5) – Yard Buff eraser: cleans paint back to bare metal">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M16 3l5 5-11 11H6l-3-3z"/><path d="M9 10l5 5M6 19h15"/></svg>Buff
             </button>
@@ -64,23 +100,8 @@
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M5 19L19 5"/></svg>
             </button>
           </div>
-          <div class="flyout">
-            <button id="stencil-btn" type="button" aria-expanded="false" aria-controls="stencil-menu" title="Stencils – Shape, text and bar masks (B / Enter to stamp)">Stencils</button>
-            <div id="stencil-menu" hidden>
-              <div class="seg" role="group" aria-label="Stencil shape">
-                <button type="button" data-stencil="diamond" aria-pressed="false" title="Hazard diamond">Diamond</button>
-                <button type="button" data-stencil="stripes" aria-pressed="false" title="Caution stripes">Stripes</button>
-                <button type="button" data-stencil="star" aria-pressed="false" title="Five-point star">Star</button>
-                <button type="button" data-stencil="target" aria-pressed="false" title="Crosshair target">Target</button>
-                <button type="button" data-stencil="text" aria-pressed="false" title="Custom text stencil">Text</button>
-                <button type="button" data-stencil="bar" aria-pressed="false" title="Bar / strip: stretch for sill cuts and stripes">Bar</button>
-              </div>
-              <input id="stencil-text" type="text" maxlength="12" placeholder="MONIKER" aria-label="Stencil text" autocomplete="off" spellcheck="false" />
-              <button id="stencil-invert" type="button" aria-pressed="false" title="Protect the shape instead of cutting through it">Invert</button>
-              <button id="stencil-adjust" type="button" aria-pressed="false" title="Drag the sheet to move it; drag the corner handle to resize">Adjust</button>
-              <button id="stencil-bake" type="button" title="Bake &amp; Peel (B / Enter) – Fill the opening with the current color and lift the stencil">Bake &amp; Peel</button>
-            </div>
-          </div>
+          <button id="stamp-btn" type="button" data-tool="stamp" aria-pressed="false" title="Stamp – Tap the car to place a shape, then press STAMP">Stamp</button>
+          <button id="stencil-btn" type="button" aria-pressed="false" title="Stencils – drop a stencil on the car; press again to lift it">Stencils</button>
           <div id="sliders">
             <label title="Size ([ ]) – Brush, nib or roller size">Size <input id="brush-size" type="range" min="2" max="150" value="40" /><output for="brush-size"></output></label>
             <label title="Hardness – Soft halo to hard edge">Hard <input id="brush-hardness" type="range" min="0" max="100" value="20" data-unit="%" /><output for="brush-hardness"></output></label>
@@ -140,12 +161,6 @@
     <button id="dock-toggle" type="button" aria-expanded="true" aria-controls="toolbar" aria-label="Show or hide tools" title="Show / hide tools">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
     </button>
-    <div id="stencil-hud" hidden>
-      <button id="hud-adjust" type="button" aria-pressed="false" title="Move / resize / rotate the stencil (painting pauses while moving)">Move</button>
-      <button id="hud-invert" type="button" aria-pressed="false" title="Invert – Protect the shape and paint around it">Invert</button>
-      <button id="hud-bake" type="button" title="Bake &amp; Peel (B / Enter) – Fill the opening with the current color and lift the stencil">Bake &amp; Peel</button>
-      <button id="hud-peel" type="button" aria-label="Peel off stencil" title="Peel off stencil (Esc) – paint stays">&#x2715; Peel</button>
-    </div>
     <div id="tip" role="tooltip" hidden></div>
     <div id="rotate-overlay" role="alert">
       <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="16" y="6" width="16" height="28" rx="3"/><path d="M22 30h4"/><path d="M8 30a16 16 0 0 0 16 12"/><path d="M8 38v-8h8"/></svg>
@@ -179,11 +194,6 @@
     <div id="practice-note" hidden role="note">
       <strong>Practice Yard</strong>
       <span>Your private sketchpad — nothing here is saved or shared.</span>
-    </div>
-    <div id="yard-hud" hidden aria-live="polite">
-      <span id="yh-name"></span>
-      <span id="yh-status"></span>
-      <div id="yh-gauge" hidden title="Aerosol pressure"><div id="yh-gauge-fill"></div></div>
     </div>
     <div id="still-working" hidden role="alertdialog" aria-labelledby="sw-title">
       <h2 id="sw-title">Still working?</h2>

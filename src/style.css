@@ -63,17 +63,23 @@ body {
   display: none;
 }
 
-#toolbar #stamp-options {
+/* Tool extras: one settings row at a time slides out above the dock. */
+#toolbar .tool-extra {
   gap: 10px;
   width: 100%;
   padding-bottom: 6px;
   border-bottom: 1px solid #333;
+  flex-wrap: wrap;
+  row-gap: 6px;
 }
 
-#toolbar #stamp-options[hidden] {
+#toolbar .tool-extra[hidden],
+#toolbar .tool-extra [hidden] {
   display: none;
 }
 
+#stencil-kind,
+#stencil-font,
 #stamp-kind {
   min-height: 32px;
   padding: 0 8px;
@@ -96,9 +102,73 @@ body {
   height: 16px;
 }
 
-#stamp-rotate {
+#stamp-rotate,
+#stamp-size,
+#roller-rotate,
+#stencil-rotate,
+#stencil-size {
   width: 90px;
   accent-color: #ffd200;
+}
+
+#toolbar #stamp-options input[type='range'] {
+  width: 70px;
+}
+
+#toolbar #roller-rotate {
+  width: 160px;
+}
+
+.extra-note {
+  color: #aaa;
+  font-size: 11px;
+}
+
+#toolbar #paintball-options .seg button[aria-pressed='true'] {
+  background: #ffd200;
+  color: #111;
+}
+
+#stencil-options #stencil-text {
+  width: 90px;
+  min-height: 32px;
+}
+
+#stencil-options #stencil-rotate,
+#stencil-options #stencil-size {
+  width: 70px;
+}
+
+#toolbar #stencil-hold,
+#toolbar #stencil-fill {
+  padding: 7px 10px;
+  border: 2px solid #111;
+  border-radius: 6px;
+  font: 900 13px/1 ui-monospace, monospace;
+  cursor: pointer;
+}
+
+#toolbar #stencil-hold {
+  background: #2a2a2a;
+  color: #eee;
+  border-color: #555;
+}
+
+#toolbar #stencil-hold[aria-pressed='true'] {
+  background: #2e9e4f;
+  color: #fff;
+  border-color: #111;
+}
+
+#toolbar #stencil-fill {
+  background: #ffd200;
+  color: #111;
+}
+
+#toolbar #stamp-btn[aria-pressed='true'],
+#toolbar #stencil-btn[aria-pressed='true'] {
+  background: #ffd200;
+  color: #111;
 }
 
 #toolbar #stamp-go {
@@ -309,7 +379,6 @@ body {
   background: #151515;
   color: #ddd;
   font: inherit;
-  text-transform: uppercase;
 }
 
 #buff-confirm span {
@@ -3163,7 +3232,7 @@ body.rollby #toolbar {
   vertical-align: -2px;
 }
 
-#tools button[data-tool='stamp'] {
+#tools button[data-tool='paintball'] {
   border-radius: 0 6px 6px 0;
 }
 
@@ -3189,8 +3258,15 @@ body.rollby #toolbar {
 #tool-options {
   display: grid;
   flex-shrink: 0;
-  width: 136px;
   justify-items: center;
+}
+
+/* Line / Stamp / Stencils sit on one line; the sliders drop below when the screen is narrow. */
+#toolbar .cluster[aria-label='Tool options'] {
+  flex-wrap: wrap;
+  justify-content: center;
+  row-gap: 6px;
+  max-width: 100%;
 }
 
 #tool-options > .seg {
