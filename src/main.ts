@@ -700,8 +700,11 @@ function copyBody(source: HTMLCanvasElement | HTMLImageElement = paintLayer): HT
   c.width = BODY.w;
   c.height = BODY.h;
   const ctx = c.getContext('2d')!;
-  if (source.width === BODY.w) ctx.drawImage(source, 0, 0);
-  else ctx.drawImage(source, BODY.x, BODY.y, BODY.w, BODY.h, 0, 0, BODY.w, BODY.h);
+  if (isBodyImage(source.width, source.height)) ctx.drawImage(source, 0, 0, BODY.w, BODY.h);
+  else {
+    const k = source.width / CAR_WIDTH;
+    ctx.drawImage(source, BODY.x * k, BODY.y * k, BODY.w * k, BODY.h * k, 0, 0, BODY.w, BODY.h);
+  }
   return c;
 }
 
@@ -776,8 +779,11 @@ function hasVisiblePaint(src: HTMLImageElement | HTMLCanvasElement): boolean {
   c.width = w;
   c.height = h;
   const ctx = c.getContext('2d', { willReadFrequently: true })!;
-  if (src.width === BODY.w) ctx.drawImage(src, 0, 0, w, h);
-  else ctx.drawImage(src, BODY.x, BODY.y, BODY.w, BODY.h, 0, 0, w, h);
+  if (isBodyImage(src.width, src.height)) ctx.drawImage(src, 0, 0, w, h);
+  else {
+    const k = src.width / CAR_WIDTH;
+    ctx.drawImage(src, BODY.x * k, BODY.y * k, BODY.w * k, BODY.h * k, 0, 0, w, h);
+  }
   const d = ctx.getImageData(0, 0, w, h).data;
   for (let i = 3; i < d.length; i += 4) if (d[i]) return true;
   return false;
@@ -3041,6 +3047,8 @@ function saveNow(body: HTMLCanvasElement = copyBody()): void {
         clearTimeout(retryTimer);
         if (uploadFailing) showToast('Back online – your piece is saved');
         uploadFailing = false;
+        // Leaving the editor saves on the way out; refresh the line once the piece has landed.
+        if (location.hash !== '#yard') reloadReel(YARDS[yard].division === 'subway' ? 'sub' : 'top');
       } else {
         scheduleRetry();
         if (!uploadFailing) {
@@ -3256,9 +3264,14 @@ function activeRollLayout(showcase = !!roll?.showcase) {
     : rollLayout();
 }
 
+// Uploads may be scaled down to fit Firestore, so tell a body-only image from a
+// full car by its shape rather than its exact width.
+const isBodyImage = (w: number, h: number) => Math.abs(w / h - BODY.w / BODY.h) < Math.abs(w / h - CAR_WIDTH / CAR_HEIGHT);
+
 function rollBitmap(src: HTMLImageElement | HTMLCanvasElement | Blob): Promise<ImageBitmap> {
-  if (!(src instanceof Blob) && src.width !== BODY.w) {
-    return createImageBitmap(src, BODY.x, BODY.y, BODY.w, BODY.h, ROLL_BITMAP);
+  if (!(src instanceof Blob) && !isBodyImage(src.width, src.height)) {
+    const k = src.width / CAR_WIDTH;
+    return createImageBitmap(src, BODY.x * k, BODY.y * k, BODY.w * k, BODY.h * k, ROLL_BITMAP);
   }
   return createImageBitmap(src, ROLL_BITMAP);
 }
@@ -4931,8 +4944,8 @@ async function loadPieceIntoEditor(reg: RegistryCar, edit: boolean): Promise<voi
     c.remoteState = 'done';
     paintCtx.globalAlpha = 1;
     paintCtx.clearRect(0, 0, CAR_WIDTH, CAR_HEIGHT);
-    if (img.width === CAR_WIDTH) paintCtx.drawImage(img, 0, 0);
-    else paintCtx.drawImage(img, BODY.x, BODY.y, BODY.w, BODY.h);
+    if (isBodyImage(img.width, img.height)) paintCtx.drawImage(img, BODY.x, BODY.y, BODY.w, BODY.h);
+    else paintCtx.drawImage(img, 0, 0, CAR_WIDTH, CAR_HEIGHT);
     c.hasPaint = true;
     c.paint = snapshot(paintLayer, true);
     currentPieceId = edit ? reg.id : null;
