@@ -2945,9 +2945,6 @@ function updateConsistUI(): void {
 updateConsistUI();
 
 // ---------- Auth & Ghost Yard sync ----------
-const SAVE_DELAY = 2000;
-// Firestore caps documents at 1 MiB.
-const MAX_DOC_BYTES = 1_000_000;
 const authBtn = document.getElementById('auth-btn') as HTMLButtonElement;
 const userName = document.getElementById('user-name')!;
 const saveStatus = document.getElementById('save-status')!;
@@ -2955,11 +2952,10 @@ let currentUser: User | null = null;
 let saveTimer = 0;
 let savePending = false;
 
+// No autosave: work is kept when the writer presses Save or leaves the editor.
 function scheduleSave(): void {
-  clearTimeout(saveTimer);
-  saveStatus.textContent = '';
   savePending = true;
-  saveTimer = window.setTimeout(() => saveNow(), SAVE_DELAY);
+  saveStatus.textContent = 'Unsaved';
 }
 
 // Saves a pending change immediately, before the paint layer is swapped to another car.
@@ -2979,8 +2975,47 @@ function blobToDataUrl(blob: Blob): Promise<string> {
 }
 
 const localKey = (yard: YardId, index: number) => `${yard}/${index}`;
+const pieceKey = (id: string) => `piece/${id}`;
 
-// Always saves locally (lossless PNG); also syncs to Firestore when a user is signed in.
+// Firestore caps a document at 1 MiB; leave room for the other fields.
+const UPLOAD_BUDGET = 900_000;
+
+// Dense pieces can encode to several MB at full size. Rather than refuse, shrink until it
+// fits: the reels only ever show cars at ~35%, so a scaled copy looks the same there.
+async function encodeForUpload(body: HTMLCanvasElement): Promise<string> {
+  let src = body;
+  let scale = 1;
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const blob = await new Promise<Blob | null>((r) => src.toBlob(r, 'image/webp', 0.85));
+    if (!blob) throw new Error('Paint encode failed');
+    const url = await blobToDataUrl(blob);
+    if (url.length <= UPLOAD_BUDGET) return url;
+    scale *= Math.max(0.3, Math.sqrt(UPLOAD_BUDGET / url.length) * 0.92);
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(body.width * scale));
+    c.height = Math.max(1, Math.round(body.height * scale));
+    const ctx = c.getContext('2d')!;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(body, 0, 0, c.width, c.height);
+    src = c;
+  }
+  throw new Error('Piece too large to upload even when scaled');
+}
+
+// Saves run one at a time, in order, so a slow upload can never be overtaken by an older one.
+let saveChain: Promise<void> = Promise.resolve();
+let uploadFailing = false;
+let retryTimer = 0;
+
+// A failed upload retries on its own, so the piece lands even if the painter has stopped.
+function scheduleRetry(): void {
+  clearTimeout(retryTimer);
+  retryTimer = window.setTimeout(() => {
+    if (location.hash === '#yard' && !practiceMode && !swapPending) saveNow();
+  }, 15_000);
+}
+
+// Always saves locally (lossless PNG), then uploads the piece.
 function saveNow(body: HTMLCanvasElement = copyBody()): void {
   savePending = false;
   if (practiceMode) {
@@ -2989,24 +3024,30 @@ function saveNow(body: HTMLCanvasElement = copyBody()): void {
   }
   const yard = currentYard;
   const index = currentCarIndex;
-  const encode = (type: string, q?: number) => new Promise<Blob | null>((r) => body.toBlob(r, type, q));
   saveStatus.textContent = 'Saving…';
-  void (async () => {
+  saveChain = saveChain.then(async () => {
     try {
-      const png = await encode('image/png');
+      const png = await new Promise<Blob | null>((r) => body.toBlob(r, 'image/png'));
       if (!png) throw new Error('Paint encode failed');
       await saveLocalCar(localKey(yard, index), png);
       const now = Date.now();
       const prevMeta = readMeta()[localKey(yard, index)];
       updateMeta(localKey(yard, index), { savedAt: now, createdAt: prevMeta?.createdAt ?? prevMeta?.savedAt ?? now });
-      const webp = await encode('image/webp', 0.9);
-      if (!webp) throw new Error('Paint encode failed');
-      const dataUrl = await blobToDataUrl(webp);
-      if (dataUrl.length > MAX_DOC_BYTES) {
-        saveStatus.textContent = 'Too large';
-        return;
-      }
+      const dataUrl = await encodeForUpload(body);
       const result = await publishPiece(dataUrl, prevMeta?.createdAt ?? now);
+      // A lossless copy keyed to the piece lets Edit reopen it at full resolution on this device.
+      if (currentPieceId) await saveLocalCar(pieceKey(currentPieceId), png);
+      if (result === 'published') {
+        clearTimeout(retryTimer);
+        if (uploadFailing) showToast('Back online – your piece is saved');
+        uploadFailing = false;
+      } else {
+        scheduleRetry();
+        if (!uploadFailing) {
+          uploadFailing = true;
+          showToast("Couldn't upload your piece – it's safe on this device and will retry", 4000);
+        }
+      }
       saveStatus.textContent =
         result === 'no-account'
           ? 'Saved on this device only'
@@ -3018,8 +3059,13 @@ function saveNow(body: HTMLCanvasElement = copyBody()): void {
     } catch (err) {
       console.error('Save failed', err);
       saveStatus.textContent = 'Save failed';
+      scheduleRetry();
+      if (!uploadFailing) {
+        uploadFailing = true;
+        showToast("Couldn't save your piece – keep this tab open, it will retry", 4000);
+      }
     }
-  })();
+  });
 }
 
 // ---------- The live piece: created on the first stroke, updated by every autosave ----------
@@ -4865,9 +4911,16 @@ function startFreshCar(): void {
 // Drops an existing piece onto the canvas: editing keeps writing to its doc, a cover starts a new one.
 async function loadPieceIntoEditor(reg: RegistryCar, edit: boolean): Promise<void> {
   try {
+    // The uploaded copy may be scaled down; this device's lossless copy is the better source.
+    const local = edit ? await loadLocalCar(pieceKey(reg.id)).catch(() => null) : null;
     const img = new Image();
-    img.src = reg.image;
-    await img.decode();
+    const localUrl = local ? URL.createObjectURL(local) : null;
+    img.src = localUrl ?? reg.image;
+    try {
+      await img.decode();
+    } finally {
+      if (localUrl) URL.revokeObjectURL(localUrl);
+    }
     currentCarIndex = Math.min(Math.max(0, reg.slot), CAR_COUNT - 1);
     applyCarBase(baseIdFor(currentYard, currentCarIndex));
     const c = car();
@@ -4878,8 +4931,8 @@ async function loadPieceIntoEditor(reg: RegistryCar, edit: boolean): Promise<voi
     c.remoteState = 'done';
     paintCtx.globalAlpha = 1;
     paintCtx.clearRect(0, 0, CAR_WIDTH, CAR_HEIGHT);
-    if (img.width === BODY.w) paintCtx.drawImage(img, BODY.x, BODY.y);
-    else paintCtx.drawImage(img, 0, 0);
+    if (img.width === CAR_WIDTH) paintCtx.drawImage(img, 0, 0);
+    else paintCtx.drawImage(img, BODY.x, BODY.y, BODY.w, BODY.h);
     c.hasPaint = true;
     c.paint = snapshot(paintLayer, true);
     currentPieceId = edit ? reg.id : null;
@@ -5441,8 +5494,28 @@ authForm.addEventListener('submit', (e) => {
 });
 setAuthMode('signin');
 
+// Set while the sign-in dialog was opened by Save, so dismissing it still keeps the piece.
+let saveOnDismiss = false;
+
+function savePiece(): void {
+  if (practiceMode || !car().hasPaint) {
+    showToast('Nothing to save yet');
+    return;
+  }
+  saveNow();
+}
+
+document.getElementById('save-car')!.addEventListener('click', (e) => {
+  (e.currentTarget as HTMLElement).blur();
+  if (signedIn()) return savePiece();
+  saveOnDismiss = true;
+  requireAuth(savePiece, false);
+});
+
 authDialog.addEventListener('close', () => {
   if (!signedIn()) pendingAuthAction = null;
+  if (saveOnDismiss && !signedIn()) savePiece();
+  saveOnDismiss = false;
   authPassword.value = '';
   authError.textContent = '';
 });

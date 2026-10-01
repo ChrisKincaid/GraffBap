@@ -2287,6 +2287,43 @@ body.showcase #yard-bar {
   display: none;
 }
 
+#save-car {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 13px;
+  border: 2px solid #111;
+  border-radius: 8px;
+  background: #3fbf5a;
+  color: #0b0c0f;
+  font: 800 13px/1 ui-monospace, monospace;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  box-shadow: 3px 3px 0 #111;
+  cursor: pointer;
+}
+
+#save-car svg {
+  width: 17px;
+  height: 17px;
+}
+
+#save-car:hover {
+  background: #5ad673;
+}
+
+#save-car:active {
+  transform: translate(2px, 2px);
+  box-shadow: 1px 1px 0 #111;
+}
+
+@media (max-width: 1000px) {
+  #save-car {
+    gap: 0;
+    padding: 9px 11px;
+  }
+}
+
 body.focus-mode #yard-bar {
   display: none !important;
 }
