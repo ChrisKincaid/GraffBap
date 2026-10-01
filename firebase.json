@@ -1,4 +1,8 @@
 {
+  "firestore": {
+    "database": "main",
+    "indexes": "firestore.indexes.json"
+  },
   "hosting": {
     "target": "graffbap-app",
     "public": "dist",

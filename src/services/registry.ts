@@ -9,6 +9,7 @@ import {
   orderBy,
   query,
   runTransaction,
+  setDoc,
   where,
   writeBatch,
   type QueryConstraint,
@@ -17,7 +18,7 @@ import { db } from './firebase';
 
 // Global car registry: every departed piece, its lifecycle status and community score.
 export type CarStatus = 'departed' | 'hall_of_fame' | 'museum' | 'buffed' | 'banned' | 'quarantined';
-export type FeedSort = 'top' | 'grave' | 'random';
+export type FeedSort = 'top' | 'grave' | 'latest' | 'oldest' | 'random' | 'painting';
 
 export interface RegistryCar {
   id: string;
@@ -29,6 +30,7 @@ export interface RegistryCar {
   image: string;
   createdAt: number;
   departedAt: number;
+  updatedAt: number;
   status: CarStatus;
   props: number;
   toys: number;
@@ -38,14 +40,21 @@ export interface RegistryCar {
   rnd: number;
   recentVotes: number[];
   hofAt?: number;
+  basedOn?: string;
+  basedOnWriter?: string;
 }
+
+// A car touched within this window is still being worked on, so it can't be rated yet.
+export const PAINTING_WINDOW_MS = 2 * 60_000;
+export const isBeingPainted = (c: Pick<RegistryCar, 'updatedAt'>, now = Date.now()) =>
+  !!c.updatedAt && now - c.updatedAt < PAINTING_WINDOW_MS;
 
 export const HOF_BASE = 5;
 export const HOF_STEP = 10;
 export const HOF_BATCH = 50;
 export const HOF_ROLLING_CAP = 100;
 export const ACTIVE_CAP = 5000;
-export const REPORT_LIMIT = 5;
+export const REPORT_LIMIT = 25;
 const DAY_MS = 86_400_000;
 const RECENT_WINDOW_MS = 30 * DAY_MS;
 // Rolling feeds only ever show these; buffed/banned/quarantined/museum never roll.
@@ -77,13 +86,15 @@ function readStats(v: unknown): Stats {
 const toCar = (id: string, v: unknown): RegistryCar => ({ ...(v as Omit<RegistryCar, 'id'>), id });
 
 export async function registerDeparture(
-  c: Pick<RegistryCar, 'yard' | 'division' | 'slot' | 'writer' | 'writerUid' | 'image' | 'createdAt'>,
+  c: Pick<RegistryCar, 'yard' | 'division' | 'slot' | 'writer' | 'writerUid' | 'image' | 'createdAt'> &
+    Partial<Pick<RegistryCar, 'basedOn' | 'basedOnWriter'>>,
 ): Promise<string> {
   const ref = doc(collection(db, CARS));
   const now = Date.now();
   const car: Omit<RegistryCar, 'id'> = {
     ...c,
     departedAt: now,
+    updatedAt: now,
     status: 'departed',
     props: 0,
     toys: 0,
@@ -99,6 +110,24 @@ export async function registerDeparture(
   await batch.commit();
   await cullIfNeeded();
   return ref.id;
+}
+
+// Autosave while painting: only the artwork and its freshness stamp move.
+export async function updatePieceImage(id: string, image: string): Promise<void> {
+  await setDoc(carRef(id), { image, updatedAt: Date.now() }, { merge: true });
+}
+
+// Pulling your own piece off the line: it stops rolling but the document is kept.
+export async function retirePiece(id: string): Promise<void> {
+  const batch = writeBatch(db);
+  batch.update(carRef(id), { status: 'buffed' });
+  batch.set(statsRef(), { active: increment(-1) }, { merge: true });
+  await batch.commit();
+}
+
+export async function getRegistryCar(id: string): Promise<RegistryCar | null> {
+  const snap = await getDoc(carRef(id));
+  return snap.exists() ? toCar(id, snap.data()) : null;
 }
 
 // Past 5,000 rolling cars, the lowest buff scores among standard (non-HoF) cars get buffed.
@@ -172,7 +201,7 @@ async function retireToMuseum(count: number): Promise<void> {
   await batch.commit();
 }
 
-// One report per profile per car; 5 reports quarantine the car off every track.
+// One report per profile per car; 25 reports quarantine the car off every track.
 export async function reportRegistryCar(id: string, uid: string): Promise<'already' | 'reported' | 'quarantined'> {
   const reportRef = doc(db, CARS, id, 'reports', uid);
   return runTransaction(db, async (tx) => {
@@ -197,6 +226,11 @@ export async function listFeed(division: 'freight' | 'subway', sort: FeedSort, n
   const base: QueryConstraint[] = [where('division', '==', division), where('status', 'in', ROLLING)];
   const run = async (...extra: QueryConstraint[]) =>
     (await getDocs(query(collection(db, CARS), ...base, ...extra))).docs.map((d) => toCar(d.id, d.data()));
+  if (sort === 'painting') {
+    return run(where('updatedAt', '>', Date.now() - PAINTING_WINDOW_MS), orderBy('updatedAt', 'desc'), limit(n));
+  }
+  if (sort === 'latest') return run(orderBy('departedAt', 'desc'), limit(n));
+  if (sort === 'oldest') return run(orderBy('departedAt', 'asc'), limit(n));
   if (sort !== 'random') return run(orderBy('net', sort === 'top' ? 'desc' : 'asc'), limit(n));
   const r = Math.random();
   const cars = await run(where('rnd', '>=', r), orderBy('rnd'), limit(n));
@@ -206,6 +240,33 @@ export async function listFeed(division: 'freight' | 'subway', sort: FeedSort, n
     [cars[i], cars[j]] = [cars[j]!, cars[i]!];
   }
   return cars;
+}
+
+// Cars this profile painted, newest touch first.
+export async function listMine(uid: string, division: 'freight' | 'subway', n: number): Promise<RegistryCar[]> {
+  const snap = await getDocs(
+    query(
+      collection(db, CARS),
+      where('division', '==', division),
+      where('status', 'in', ROLLING),
+      where('writerUid', '==', uid),
+      orderBy('updatedAt', 'desc'),
+      limit(n),
+    ),
+  );
+  return snap.docs.map((d) => toCar(d.id, d.data()));
+}
+
+export async function countPainting(division: 'freight' | 'subway'): Promise<number> {
+  const snap = await getCountFromServer(
+    query(
+      collection(db, CARS),
+      where('division', '==', division),
+      where('status', 'in', ROLLING),
+      where('updatedAt', '>', Date.now() - PAINTING_WINDOW_MS),
+    ),
+  );
+  return snap.data().count;
 }
 
 export async function listMuseum(n: number): Promise<RegistryCar[]> {

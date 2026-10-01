@@ -1,12 +1,17 @@
 import { initializeApp } from 'firebase/app';
 import {
   createUserWithEmailAndPassword,
+  EmailAuthProvider,
   getAuth,
   GithubAuthProvider,
   GoogleAuthProvider,
+  linkWithCredential,
+  linkWithPopup,
+  signInAnonymously,
   signInWithEmailAndPassword,
   signInWithPopup,
   signOut,
+  type User,
 } from 'firebase/auth';
 import {
   collection,
@@ -70,12 +75,31 @@ export const db = (() => {
   }
 })();
 
+// Everyone gets a real uid on arrival, so anonymous work still has an owner.
+export function ensureAnonymous() {
+  return auth.currentUser ? Promise.resolve(auth.currentUser) : signInAnonymously(auth).then((c) => c.user);
+}
+
+// Linking keeps the same uid, so pieces painted anonymously carry over to the profile.
+const linkOrSignIn = async (user: User | null, run: (u: User) => Promise<unknown>, fallback: () => Promise<unknown>) => {
+  if (!user?.isAnonymous) return fallback();
+  try {
+    return await run(user);
+  } catch (err) {
+    // Credential already belongs to a real profile: sign into that one instead.
+    if ((err as { code?: string }).code === 'auth/credential-already-in-use') return fallback();
+    throw err;
+  }
+};
+
 export function signInWithGoogle() {
-  return signInWithPopup(auth, new GoogleAuthProvider());
+  const provider = new GoogleAuthProvider();
+  return linkOrSignIn(auth.currentUser, (u) => linkWithPopup(u, provider), () => signInWithPopup(auth, provider));
 }
 
 export function signInWithGithub() {
-  return signInWithPopup(auth, new GithubAuthProvider());
+  const provider = new GithubAuthProvider();
+  return linkOrSignIn(auth.currentUser, (u) => linkWithPopup(u, provider), () => signInWithPopup(auth, provider));
 }
 
 export function signInWithEmail(email: string, password: string) {
@@ -83,7 +107,12 @@ export function signInWithEmail(email: string, password: string) {
 }
 
 export function registerWithEmail(email: string, password: string) {
-  return createUserWithEmailAndPassword(auth, email, password);
+  const cred = EmailAuthProvider.credential(email, password);
+  return linkOrSignIn(
+    auth.currentUser,
+    (u) => linkWithCredential(u, cred),
+    () => createUserWithEmailAndPassword(auth, email, password),
+  );
 }
 
 export function signOutUser() {
