@@ -139,6 +139,7 @@ body {
   width: 70px;
 }
 
+#toolbar #stencil-extend,
 #toolbar #stencil-hold,
 #toolbar #stencil-fill {
   padding: 7px 10px;
@@ -148,12 +149,14 @@ body {
   cursor: pointer;
 }
 
+#toolbar #stencil-extend,
 #toolbar #stencil-hold {
   background: #2a2a2a;
   color: #eee;
   border-color: #555;
 }
 
+#toolbar #stencil-extend[aria-pressed='true'],
 #toolbar #stencil-hold[aria-pressed='true'] {
   background: #2e9e4f;
   color: #fff;

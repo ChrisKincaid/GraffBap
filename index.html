@@ -63,6 +63,7 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5"/></svg>
           <input id="stencil-rotate" type="range" min="0" max="359" value="0" aria-label="Rotate stencil" />
         </label>
+        <button id="stencil-extend" type="button" aria-pressed="false" title="Stretch the stencil sheet over the whole car so paint only lands inside the cut-out">EXTEND</button>
         <button id="stencil-hold" type="button" aria-pressed="false" title="Hold the stencil in place so you can spray through it">HOLD</button>
         <button id="stencil-fill" type="button" title="Fill the stencil opening with the current colour">FILL</button>
       </div>
@@ -214,7 +215,7 @@
           <span id="reel-description" class="reel-description"></span>
           <button id="sc-play" class="reel-control-play" type="button" aria-label="Pause" title="Pause">&#x23F8;</button>
           <button id="sc-speed" class="reel-control-speed" type="button" title="Speed 1x">1x</button>
-          <span class="reel-sort-label">Sort by</span><select id="sc-sort" class="reel-sort" aria-label="Sort Freight cars"><option value="top">Best rated</option><option value="grave">Worst rated</option><option value="latest">Latest</option><option value="oldest">Oldest</option><option value="random">Random</option><option value="painting">Currently painting</option></select>
+          <span class="reel-sort-label">Sort by</span><select id="sc-sort" class="reel-sort" aria-label="Sort Freight cars"><option value="latest" selected>Latest</option><option value="top">Best rated</option><option value="grave">Worst rated</option><option value="oldest">Oldest</option><option value="random">Random</option><option value="painting">Currently painting</option></select>
           <button id="sc-mine" class="reel-mine" type="button" aria-pressed="false" title="Show only the cars you painted">Show My Work</button>
           <button id="reel-back" class="reel-back" type="button" hidden>Back to Mainline</button>
         </div>
@@ -232,7 +233,7 @@
           <span id="sub-description" class="reel-description"></span>
           <button id="sub-play" class="reel-control-play" type="button" aria-label="Pause" title="Pause">&#x23F8;</button>
           <button id="sub-speed" class="reel-control-speed" type="button" title="Speed 1x">1x</button>
-          <span class="reel-sort-label">Sort by</span><select id="sub-sort" class="reel-sort" aria-label="Sort Subway cars"><option value="top">Best rated</option><option value="grave">Worst rated</option><option value="latest">Latest</option><option value="oldest">Oldest</option><option value="random">Random</option><option value="painting">Currently painting</option></select>
+          <span class="reel-sort-label">Sort by</span><select id="sub-sort" class="reel-sort" aria-label="Sort Subway cars"><option value="latest" selected>Latest</option><option value="top">Best rated</option><option value="grave">Worst rated</option><option value="oldest">Oldest</option><option value="random">Random</option><option value="painting">Currently painting</option></select>
           <button id="sub-mine" class="reel-mine" type="button" aria-pressed="false" title="Show only the cars you painted">Show My Work</button>
           <button id="sub-back" class="reel-back" type="button" hidden>Back to Subway Line</button>
         </div>

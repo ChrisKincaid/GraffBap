@@ -1131,6 +1131,8 @@ interface Stencil {
   y: number;
   size: number;
   invert: boolean;
+  // Sheet stretched over the whole car: paint lands only inside the cutout.
+  extend: boolean;
   text: string;
   // Radians, clockwise around (x, y).
   angle: number;
@@ -1272,6 +1274,10 @@ function ensureMask(): boolean {
   maskCtx.globalCompositeOperation = 'source-over';
   maskCtx.fillStyle = '#000';
   maskCtx.clearRect(0, 0, CAR_WIDTH, CAR_HEIGHT);
+  if (s.extend) {
+    inStencilFrame(maskCtx, s, () => paintShapeLocal(maskCtx, s));
+    return true;
+  }
   maskCtx.fillRect(0, 0, CAR_WIDTH, CAR_HEIGHT);
   maskCtx.globalCompositeOperation = 'destination-out';
   inStencilFrame(maskCtx, s, () => {
@@ -1343,15 +1349,24 @@ function ensureFilm(): void {
   const { ex: rx, ey: ry } = sheetExtents(s);
   const ex = rx + 4;
   const ey = ry + 4;
-  const res = Math.min(1, 1024 / Math.max(ex, ey));
+  const box = s.extend ? { x: 0, y: 0, w: CAR_WIDTH, h: CAR_HEIGHT } : { x: s.x - ex, y: s.y - ey, w: ex * 2, h: ey * 2 };
+  const res = Math.min(1, 1024 / Math.max(box.w / 2, box.h / 2));
   const cv = document.createElement('canvas');
-  cv.width = Math.max(1, Math.ceil(ex * 2 * res));
-  cv.height = Math.max(1, Math.ceil(ey * 2 * res));
+  cv.width = Math.max(1, Math.ceil(box.w * res));
+  cv.height = Math.max(1, Math.ceil(box.h * res));
   const k = cv.getContext('2d')!;
   k.scale(res, res);
-  k.translate(ex, ey);
+  k.translate(s.x - box.x, s.y - box.y);
   k.rotate(s.angle);
-  const body = () => (s.invert ? paintShapeLocal(k, s) : k.fillRect(-hw, -hh, hw * 2, hh * 2));
+  const body = () => {
+    if (s.extend) {
+      k.save();
+      k.setTransform(res, 0, 0, res, 0, 0);
+      k.fillRect(0, 0, box.w, box.h);
+      k.restore();
+    } else if (s.invert) paintShapeLocal(k, s);
+    else k.fillRect(-hw, -hh, hw * 2, hh * 2);
+  };
   k.fillStyle = 'rgba(196,164,112,0.6)';
   body();
   k.fillStyle = kraftPattern(k);
@@ -1365,9 +1380,9 @@ function ensureFilm(): void {
   k.strokeStyle = 'rgba(70,45,20,0.85)';
   k.lineWidth = 2.5;
   paintShapeLocal(k, s, true);
-  if (!s.invert) k.strokeRect(-hw, -hh, hw * 2, hh * 2);
+  if (!s.invert && !s.extend) k.strokeRect(-hw, -hh, hw * 2, hh * 2);
   filmCanvas = cv;
-  filmBox = { x: s.x - ex, y: s.y - ey, w: ex * 2, h: ey * 2 };
+  filmBox = box;
 }
 
 // Before HOLD, a touch anywhere drags the stencil along with the finger.
@@ -2593,6 +2608,7 @@ const stencilTextInput = document.getElementById('stencil-text') as HTMLInputEle
 const stencilSizeInput = document.getElementById('stencil-size') as HTMLInputElement;
 const stencilRotateInput = document.getElementById('stencil-rotate') as HTMLInputElement;
 const stencilHoldBtn = document.getElementById('stencil-hold') as HTMLButtonElement;
+const stencilExtendBtn = document.getElementById('stencil-extend') as HTMLButtonElement;
 
 STENCIL_FONTS.forEach(([name], i) => {
   const o = new Option(name, String(i));
@@ -2623,6 +2639,7 @@ function updateStencilUI(): void {
   stencilTextInput.hidden = !isText;
   stencilFontSelect.hidden = !isText;
   stencilHoldBtn.setAttribute('aria-pressed', String(!!stencil && !stencilEdit));
+  stencilExtendBtn.setAttribute('aria-pressed', String(!!stencil?.extend));
   markStencilChanged();
 }
 
@@ -2630,7 +2647,7 @@ function dropStencil(): void {
   if (mode !== 'none') return;
   const { x, y } = viewCentre();
   stencilSizeInput.value = '50';
-  stencil = { kind: 'text', shape: 0, font: 0, x, y, size: 0, invert: false, text: 'TAG', angle: 0 };
+  stencil = { kind: 'text', shape: 0, font: 0, x, y, size: 0, invert: false, extend: false, text: 'TAG', angle: 0 };
   stencilEdit = true;
   syncStencil();
 }
@@ -2697,6 +2714,12 @@ stencilFontSelect.addEventListener('change', () => {
   syncStencil();
 });
 for (const el of [stencilTextInput, stencilSizeInput, stencilRotateInput]) el.addEventListener('input', syncStencil);
+stencilExtendBtn.addEventListener('click', () => {
+  stencilExtendBtn.blur();
+  if (!stencil) return;
+  stencil.extend = !stencil.extend;
+  updateStencilUI();
+});
 stencilHoldBtn.addEventListener('click', () => {
   stencilHoldBtn.blur();
   if (!stencil) return;
@@ -4073,8 +4096,8 @@ async function refreshPaintingOption(): Promise<void> {
 void refreshPaintingOption();
 setInterval(() => void refreshPaintingOption(), 60_000);
 
-let topSort: SortMode = 'top';
-let subSort: SortMode = 'top';
+let topSort: SortMode = 'latest';
+let subSort: SortMode = 'latest';
 
 function reloadReel(id: ReelId): void {
   if (id === 'sub') loadSubwayLine(subwayReel.yard);
