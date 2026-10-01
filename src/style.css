@@ -1583,20 +1583,88 @@ body.showcase .dispatch {
   font: 12px/1.4 system-ui, sans-serif;
 }
 
+.cc-preview {
+  display: none;
+}
+
 @media (max-width: 700px) {
   .reel.has-selection .reel-track {
     margin-right: 0;
   }
 
+  /* Tapping a car opens a full-screen panel, so there's no doubt which car it is. */
   #car-card {
-    left: 8px !important;
-    right: 8px;
-    top: auto !important;
-    bottom: 8px;
+    position: fixed;
+    inset: 0;
     width: auto;
-    height: auto !important;
-    border: 1px solid #555;
-    border-radius: 6px;
+    max-width: none;
+    height: auto;
+    padding: 54px 14px 14px;
+    border: none;
+    border-radius: 0;
+    background: #0b0c0f;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    z-index: 30;
+  }
+
+  #car-card .cc-preview {
+    display: block;
+    width: 100%;
+    height: auto;
+    margin-bottom: 14px;
+    border: 1px solid #2c2f36;
+    border-radius: 4px;
+    background: #000;
+  }
+
+  #car-card .cc-close {
+    top: 10px;
+    right: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    border: 1px solid #3a3d44;
+    border-radius: 8px;
+    background: #15171b;
+    color: #e8e6e1;
+    font-size: 26px;
+  }
+
+  #car-card .cc-date,
+  #car-card .cc-by,
+  #car-card .cc-approval,
+  #car-card .cc-tally {
+    font-size: 14px;
+  }
+
+  #car-card .cc-actions {
+    gap: 10px;
+    margin: 16px 0 0;
+    padding: 0;
+    border: none;
+    background: none;
+  }
+
+  #car-card .cc-actions > button {
+    min-height: 52px;
+    border: 1px solid #3a3d44;
+    border-radius: 8px;
+  }
+
+  #car-card .cc-actions > button svg {
+    width: 22px;
+    height: 22px;
+  }
+
+  #car-card .cc-paint {
+    margin: 12px 0 0;
+    min-height: 54px;
+    border: none;
+    border-radius: 8px;
+    font-size: 14px;
   }
 }
 
@@ -1646,7 +1714,7 @@ body.showcase .dispatch {
   display: flex;
   align-items: stretch;
   gap: 6px;
-  margin: auto -12px -12px;
+  margin: 10px -12px -12px;
   padding: 8px 10px;
   border-top: 1px solid #2c2f36;
   border-radius: 0;

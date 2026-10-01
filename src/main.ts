@@ -1046,7 +1046,7 @@ function spawnGlaze(): void {
   glazes.push({ c, x: x0, y: y0, t0: performance.now() });
   if (glazes.length > MAX_GLAZES) glazes.shift();
 }
-// Nib runs lower-left to upper-right: down-strokes go broad, 45Â° up-right slices go hairline.
+// Nib runs lower-left to upper-right: down-strokes go broad, 45° up-right slices go hairline.
 const CHISEL_ANGLE = -Math.PI / 4;
 
 function drawChiselNib(x: number, y: number): void {
@@ -1153,7 +1153,7 @@ function sheetHalf(s: Stencil): { hw: number; hh: number } {
   return { hw: measureCtx.measureText(s.text).width / 2 + f * 0.3, hh: f * 0.62 };
 }
 
-// Cutout geometry in car space; all shapes fit inside the 1.2Ã—size sheet and are filled even-odd.
+// Cutout geometry in car space; all shapes fit inside the 1.2×size sheet and are filled even-odd.
 function addStencilShape(p: Path2D, s: Stencil): void {
   const { x, y, size: k } = s;
   if (s.kind === 'diamond') {
@@ -1394,7 +1394,7 @@ function dragAdjust(x: number, y: number, snap: boolean): void {
     stencil.x = x - adjust.dx;
     stencil.y = y - adjust.dy;
   } else if (stencil && adjust.kind === 'rotate') {
-    // Knob sits straight above center, so pointing up (-90Â°) means 0 rotation.
+    // Knob sits straight above center, so pointing up (-90°) means 0 rotation.
     const a = Math.atan2(y - stencil.y, x - stencil.x) + Math.PI / 2;
     stencil.angle = snap ? Math.round(a / ROT_SNAP) * ROT_SNAP : a;
   } else if (stencil?.kind === 'bar') {
@@ -2593,7 +2593,7 @@ function bakeStencil(): void {
   k.translate(-x0, -y0);
   k.fillStyle = brush.color;
   inStencilFrame(k, s, () => k.fillRect(-hw, -hh, hw * 2, hh * 2));
-  // Sheet âˆ© allowed region = exactly the opening, for text and shapes alike.
+  // Sheet ∩ allowed region = exactly the opening, for text and shapes alike.
   applyMaskTo(k, w, h, x0, y0);
   pushHistory();
   playPuff();
@@ -2608,7 +2608,7 @@ function bakeStencil(): void {
   scheduleSave();
 }
 
-// âœ• Peel / Esc: lift the sheet only; whatever was sprayed through stays, no fill is added.
+// ✕ Peel / Esc: lift the sheet only; whatever was sprayed through stays, no fill is added.
 function peelStencil(): void {
   if (!stencil) return;
   playPeel();
@@ -2889,7 +2889,7 @@ focusBtn.addEventListener('click', () => {
   document.body.classList.toggle('focus-mode', active);
   focusBtn.setAttribute('aria-pressed', String(active));
   focusBtn.setAttribute('aria-label', active ? 'Exit focus mode' : 'Focus mode');
-  focusBtn.title = active ? 'Exit Focus â€“ Restore full interface' : 'Focus â€“ Maximize the canvas';
+  focusBtn.title = active ? 'Exit Focus – Restore full interface' : 'Focus – Maximize the canvas';
   fitCamera(true);
   dirty = true;
   focusBtn.blur();
@@ -2936,7 +2936,7 @@ yardSelect.addEventListener('change', () => {
   updateConsistUI();
 });
 
-const carLabel = (i: number, hasPaint: boolean) => `Car ${String(i + 1).padStart(2, '0')}${hasPaint ? ' â€¢' : ''}`;
+const carLabel = (i: number, hasPaint: boolean) => `Car ${String(i + 1).padStart(2, '0')}${hasPaint ? ' •' : ''}`;
 
 function updateConsistUI(): void {
   yardSelect.value = currentYard;
@@ -2984,13 +2984,13 @@ const localKey = (yard: YardId, index: number) => `${yard}/${index}`;
 function saveNow(body: HTMLCanvasElement = copyBody()): void {
   savePending = false;
   if (practiceMode) {
-    saveStatus.textContent = 'Practice Â· not saved';
+    saveStatus.textContent = 'Practice · not saved';
     return;
   }
   const yard = currentYard;
   const index = currentCarIndex;
   const encode = (type: string, q?: number) => new Promise<Blob | null>((r) => body.toBlob(r, type, q));
-  saveStatus.textContent = 'Savingâ€¦';
+  saveStatus.textContent = 'Saving…';
   void (async () => {
     try {
       const png = await encode('image/png');
@@ -3433,7 +3433,7 @@ function renderRollBy(now: number): void {
   if (viewCar !== r.viewCar) {
     r.viewCar = viewCar;
     rollCarLabel.textContent =
-      viewCar < 0 ? 'Car â€” / 20' : `${carLabel(viewCar, consist[viewCar]!.hasPaint)} / 20`;
+      viewCar < 0 ? 'Car — / 20' : `${carLabel(viewCar, consist[viewCar]!.hasPaint)} / 20`;
   }
   positionCarCard();
 }
@@ -3454,6 +3454,7 @@ function sizeShowcaseCanvas(): void {
 }
 const carCard = document.getElementById('car-card')!;
 const ccTally = carCard.querySelector('.cc-tally') as HTMLElement;
+const ccPreview = document.getElementById('cc-preview') as HTMLCanvasElement;
 const ccDate = carCard.querySelector('.cc-date')!;
 const ccBy = carCard.querySelector('.cc-by') as HTMLElement;
 const ccPropsBtn = document.getElementById('cc-props') as HTMLButtonElement;
@@ -3600,7 +3601,7 @@ const entryKey = (e: RollEntry) =>
   e.reg ? `reg/${e.reg.id}` : e.yard === 'preset' ? `preset/${e.index}` : localKey(e.yard, e.index);
 const entryOrigin = (e: RollEntry) => {
   if (e.yard === 'preset') return 'Community Line';
-  const tag = e.reg?.status === 'hall_of_fame' ? ' Â· Hall of Fame' : e.reg?.status === 'museum' ? ' Â· Museum' : '';
+  const tag = e.reg?.status === 'hall_of_fame' ? ' · Hall of Fame' : e.reg?.status === 'museum' ? ' · Museum' : '';
   return YARDS[e.yard].label + tag;
 };
 
@@ -3824,13 +3825,13 @@ function reportEntry(e: RollEntry, id: ReelId): void {
   if (!reg) {
     markReported(entryKey(e));
     renderReelBar(id);
-    showToast('Report sent â€“ thanks for keeping the line clean.');
+    showToast('Report sent – thanks for keeping the line clean.');
     return;
   }
   void reportRegistryCar(reg.id, currentUser.uid)
     .then((res) => {
       if (res === 'already') showToast('You already reported this car.');
-      else if (res === 'reported') showToast('Report sent â€“ thanks for keeping the line clean.');
+      else if (res === 'reported') showToast('Report sent – thanks for keeping the line clean.');
       else {
         showToast('Car quarantined and pulled from the tracks.');
         reloadReel(id);
@@ -3875,7 +3876,6 @@ function showCard(i: number, src: 'top' | 'sub' = 'top'): void {
   if (!e) {
     carCard.style.left = '';
     carCard.style.top = '';
-    carCard.style.height = '';
     return;
   }
   positionCarCard();
@@ -3910,6 +3910,28 @@ function renderCard(e: RollEntry): void {
   renderRating(e, cardRatingUI);
   if (wip) ccTally.textContent = 'Being painted right now';
   if (e.reg?.basedOnWriter) ccBy.textContent = `${ccBy.textContent} · over ${e.reg.basedOnWriter}`;
+  drawCardPreview(e);
+}
+
+// The full-screen phone panel shows the car itself, so there's no guessing which one you tapped.
+function drawCardPreview(e: RollEntry): void {
+  if (!mobileCard()) return;
+  const w = Math.max(1, Math.round(ccPreview.clientWidth || carCard.clientWidth - 28));
+  const scale = w / CAR_WIDTH;
+  const h = Math.max(1, Math.round(EXPORT_CROP.h * scale));
+  const d = Math.min(window.devicePixelRatio || 1, 2);
+  ccPreview.width = Math.round(w * d);
+  ccPreview.height = Math.round(h * d);
+  ccPreview.style.height = `${h}px`;
+  const ctx = ccPreview.getContext('2d');
+  if (!ctx) return;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, ccPreview.width, ccPreview.height);
+  const s = d * scale;
+  ctx.setTransform(s, 0, 0, s, 0, -EXPORT_CROP.y * s);
+  const img = cardSrc === 'sub' ? subwayReel.images[cardCar] : roll?.images[cardCar];
+  drawCarComposite(ctx, entryBaseId(e), img ?? null, false);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
 }
 
 // Keeps the open card in step with the reel's active car.
@@ -3918,16 +3940,23 @@ function refreshCard(): void {
   if (e) renderCard(e);
 }
 
+// Phones get a full-screen panel instead of a side gutter.
+const mobileCard = () => window.matchMedia('(max-width: 700px)').matches;
+
 // The selected-car panel sits in the gutter the reel track opens up, so it reads as part of the reel.
 function positionCarCard(): void {
   if (cardCar < 0 || carCard.hidden) return;
+  if (mobileCard()) {
+    carCard.style.left = '';
+    carCard.style.top = '';
+    return;
+  }
   const frame = document.getElementById(cardSrc === 'sub' ? 'subway-frame' : 'showcase-frame');
   const track = frame?.querySelector('.reel-track');
   if (!track) return;
   const bounds = track.getBoundingClientRect();
   carCard.style.left = `${bounds.right}px`;
   carCard.style.top = `${bounds.top}px`;
-  carCard.style.height = `${bounds.height}px`;
 }
 
 ccCloseBtn.addEventListener('click', () => {
@@ -4021,7 +4050,7 @@ function renderRating(e: RollEntry, ui: RatingUI): void {
   const total = p + t;
   ui.props.textContent = String(p);
   ui.toys.textContent = String(t);
-  ui.approval.textContent = total ? `${Math.round((p / total) * 100)}% approval Â· ${total} vote${total === 1 ? '' : 's'}` : 'No votes yet';
+  ui.approval.textContent = total ? `${Math.round((p / total) * 100)}% approval · ${total} vote${total === 1 ? '' : 's'}` : 'No votes yet';
   const mine = myVote(key);
   ui.propsBtn.setAttribute('aria-pressed', String(mine === 'props'));
   ui.toyBtn.setAttribute('aria-pressed', String(mine === 'toy'));
@@ -4570,8 +4599,8 @@ function openBenchEntry(e: RollEntry): void {
   benchCar = null;
   const token = ++benchToken;
   const v = CAR_VARIANTS[e.index]!;
-  document.getElementById('bench-title')!.textContent = `Car ${String(e.index + 1).padStart(2, '0')} Â· ${v.mark} ${v.number}`;
-  document.getElementById('bench-writer')!.textContent = entryWriter(e) ?? 'Bare steel â€“ waiting for a writer';
+  document.getElementById('bench-title')!.textContent = `Car ${String(e.index + 1).padStart(2, '0')} · ${v.mark} ${v.number}`;
+  document.getElementById('bench-writer')!.textContent = entryWriter(e) ?? 'Bare steel – waiting for a writer';
   document.getElementById('bench-origin')!.textContent = entryOrigin(e);
   benchPropsCount.textContent = String(entryProps(e, readMeta()));
   renderRating(e, benchRatingUI());
@@ -4641,7 +4670,7 @@ benchToyBtn.addEventListener('click', () => {
 benchExportBtn.addEventListener('click', () => {
   const e = benchEntry;
   if (!e || !benchCar) return;
-  // Exactly what the bench shows plus the BoxBap.com logo â€“ no writer, date, or yard stamp.
+  // Exactly what the bench shows plus the BoxBap.com logo – no writer, date, or yard stamp.
   const out = benchBgBox.checked ? benchCanvas : benchCar;
   const tag = e.yard === 'preset' ? 'community' : e.yard;
   void runExport(async () =>
@@ -5060,7 +5089,7 @@ function yardTick(dt: number): void {
   else gauge = Math.min(1, gauge + dt / GAUGE_REFILL_S);
   if (gauge <= 0.02 && !gaugeDryNoticed) {
     gaugeDryNoticed = true;
-    showNotice("Can's dry â€“ let it breathe");
+    showNotice("Can's dry – let it breathe");
   } else if (gauge > 0.2) gaugeDryNoticed = false;
 
   // Practice holds nothing, so it never gets timed out.
@@ -5070,7 +5099,7 @@ function yardTick(dt: number): void {
       markActive();
       flushActiveCar();
       location.hash = '#gallery';
-      showToast('Session closed â€“ your piece is on the line');
+      showToast('Session closed – your piece is on the line');
     } else if (idle >= IDLE_WARN_MS) {
       idleModal.hidden = false;
       idleCountdown.textContent = clock(IDLE_EXIT_MS - idle);
@@ -5174,7 +5203,7 @@ function downloadCanvas(c: HTMLCanvasElement, name: string): Promise<void> {
 async function runExport(task: () => Promise<void>): Promise<void> {
   if (exporting) return;
   exporting = true;
-  showToast('Rendering exportâ€¦', 0);
+  showToast('Rendering export…', 0);
   // Let the toast paint before the heavy synchronous compositing.
   await new Promise((r) => requestAnimationFrame(() => setTimeout(r)));
   try {
