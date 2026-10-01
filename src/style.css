@@ -125,8 +125,11 @@ body {
   cursor: pointer;
 }
 
-#toolbar button:hover:not(:disabled) {
-  background: #3a3a3a;
+/* Touch screens keep :hover stuck on the last-tapped button, which used to hide toggle state. */
+@media (hover: hover) {
+  #toolbar button:hover:not(:disabled):not([aria-pressed='true']) {
+    background: #3a3a3a;
+  }
 }
 
 #save-status {
@@ -2284,6 +2287,53 @@ body.rollby #stencil-hud {
 }
 
 body.showcase #yard-bar {
+  display: none;
+}
+
+#view-bar {
+  position: fixed;
+  left: 50%;
+  z-index: 9;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: min(560px, calc(100vw - 24px));
+  height: 44px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: rgba(20, 20, 20, 0.8);
+  transform: translateX(-50%);
+  touch-action: none;
+}
+
+#view-bar button {
+  flex: 0 0 44px;
+  height: 36px;
+  border: 1px solid #3a3d44;
+  border-radius: 8px;
+  background: #2a2a2a;
+  color: #ffd200;
+  font-size: 16px;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+#view-bar button:active {
+  background: #ffd200;
+  color: #111;
+}
+
+#zoom-range {
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+  accent-color: #ffd200;
+}
+
+body.showcase #view-bar,
+body.rollby #view-bar,
+body.focus-mode #view-bar {
   display: none;
 }
 

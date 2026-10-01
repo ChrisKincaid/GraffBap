@@ -982,9 +982,9 @@ let sprayAlpha = 1;
 let rollerBounds = { minX: 0, maxX: 0, maxY: 0 };
 let rollerStreaks: CanvasPattern | null = null;
 
-const ROLLER_PRESETS: Record<RollerPreset, number> = { standard: 180, wide: 360 };
 const sizeT = () => (brush.size - 2) / 148;
-const rollerWidth = () => ROLLER_PRESETS[brush.roller] * (0.75 + sizeT() * 0.5);
+// Car space runs ~20 units to the inch, so the size slider spans a 6" to 36" roller.
+const rollerWidth = () => 120 + sizeT() * 600;
 const mopNib = () => 4 + sizeT() * 36;
 const chiselWidth = () => 6 + sizeT() * 54;
 
@@ -1939,29 +1939,57 @@ let dpr = 1;
 const reelDpr = () => Math.min(dpr, 2);
 let dirty = true;
 
-// Phones/tablets in landscape with little height get a collapsible dock and a reserved strip for its toggle.
+// Phones/tablets in landscape with little height get a collapsible dock.
 const compactQuery = window.matchMedia('(orientation: landscape) and (max-height: 500px)');
-const DOCK_RESERVE = 56;
-const viewHeight = () => window.innerHeight - (compactQuery.matches ? DOCK_RESERVE : 0);
 
-const fitScale = () => Math.min(window.innerWidth / CAR_WIDTH, viewHeight() / CAR_HEIGHT) * 0.95;
+const fitScale = () => {
+  const { top, bottom } = paintRegion();
+  return Math.min(window.innerWidth / CAR_WIDTH, (bottom - top) / CAR_HEIGHT) * 0.95;
+};
 
-// Zoom range is relative to the fitted view: never smaller than 60% of fit, never deeper than ~8x.
-function scaleBounds(): [number, number] {
-  const fit = fitScale();
-  return [Math.max(MIN_SCALE, fit * 0.6), Math.min(MAX_SCALE, Math.max(2, fit * 8))];
+const VIEW_BAR_H = 52;
+// Car-space margin kept visible above and below the painted body at full zoom.
+const BODY_PAD = 40;
+
+// Screen strip the car lives in: under the top bar and HUD, above the view bar and tool dock.
+// offsetParent is always null for fixed elements, so visibility is read from client rects.
+const shown = (el: HTMLElement | null): el is HTMLElement => !!el && el.getClientRects().length > 0;
+function paintRegion(): { top: number; bottom: number } {
+  let top = 8;
+  for (const id of ['yard-bar', 'yard-hud']) {
+    const el = document.getElementById(id);
+    if (shown(el)) top = Math.max(top, el.getBoundingClientRect().bottom + 8);
+  }
+  const dock = document.getElementById('toolbar');
+  const dockTop = shown(dock) ? dock.getBoundingClientRect().top : window.innerHeight;
+  return { top, bottom: Math.max(top + 60, dockTop - VIEW_BAR_H - 8) };
 }
 
-// Keeps at least a margin of the car on screen so it can't be panned out of sight.
+// Deepest zoom is where the body exactly fills the strip, so its top and bottom never leave the screen.
+function scaleBounds(): [number, number] {
+  const fit = fitScale();
+  const { top, bottom } = paintRegion();
+  return [fit, Math.min(MAX_SCALE, Math.max(fit, (bottom - top) / (BODY.h + BODY_PAD * 2)))];
+}
+
+// Vertical is locked to the body's centre; horizontally the car can't be pushed off either edge.
 function clampCamera(): void {
-  const m = 120;
-  cam.x = Math.min(window.innerWidth - m, Math.max(m - CAR_WIDTH * cam.scale, cam.x));
-  cam.y = Math.min(window.innerHeight - m, Math.max(m - CAR_HEIGHT * cam.scale, cam.y));
+  const { top, bottom } = paintRegion();
+  cam.y = (top + bottom) / 2 - (BODY.y + BODY.h / 2) * cam.scale;
+  const carW = CAR_WIDTH * cam.scale;
+  const W = window.innerWidth;
+  cam.x = carW <= W ? (W - carW) / 2 : Math.min(0, Math.max(W - carW, cam.x));
+  syncViewBar();
 }
 
 function fitTarget(): { x: number; y: number; scale: number } {
   const scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, fitScale()));
-  return { x: (window.innerWidth - CAR_WIDTH * scale) / 2, y: (viewHeight() - CAR_HEIGHT * scale) / 2, scale };
+  const { top, bottom } = paintRegion();
+  return {
+    x: (window.innerWidth - CAR_WIDTH * scale) / 2,
+    y: (top + bottom) / 2 - (BODY.y + BODY.h / 2) * scale,
+    scale,
+  };
 }
 
 const CAM_ANIM_MS = 350;
@@ -1971,6 +1999,7 @@ let camAnim: { from: typeof cam; to: typeof cam; t0: number } | null = null;
 function fitCamera(animate = false): void {
   if (!animate) {
     Object.assign(cam, fitTarget());
+    syncViewBar();
     return;
   }
   camMoved = false;
@@ -1985,8 +2014,70 @@ function resize(): void {
   viewport.width = Math.floor(window.innerWidth * dpr);
   viewport.height = Math.floor(window.innerHeight * dpr);
   if (!camMoved) fitCamera();
+  else clampCamera();
   dirty = true;
 }
+
+// ---------- View bar: zoom slider and hold-to-pan rockers under the car ----------
+const viewBar = document.getElementById('view-bar')!;
+const zoomRange = document.getElementById('zoom-range') as HTMLInputElement;
+
+// Slider runs 0-100 on a log scale between the fitted view and the deepest allowed zoom.
+function syncViewBar(): void {
+  const [lo, hi] = scaleBounds();
+  const span = Math.log(hi / lo);
+  zoomRange.disabled = span < 0.01;
+  zoomRange.value = String(span < 0.01 ? 0 : Math.round((Math.log(cam.scale / lo) / span) * 100));
+  const { bottom } = paintRegion();
+  viewBar.style.top = `${Math.min(bottom + 8, cam.y + CAR_HEIGHT * cam.scale + 6)}px`;
+}
+
+zoomRange.addEventListener('input', () => {
+  const [lo, hi] = scaleBounds();
+  const W = window.innerWidth;
+  // Zoom about the middle of the screen so the part you're looking at stays put.
+  const cx = (W / 2 - cam.x) / cam.scale;
+  cam.scale = lo * Math.pow(hi / lo, Number(zoomRange.value) / 100);
+  cam.x = W / 2 - cx * cam.scale;
+  camAnim = null;
+  camMoved = true;
+  clampCamera();
+  dirty = true;
+});
+
+let panDir = 0;
+let panLast = 0;
+function panStep(now: number): void {
+  if (!panDir) return;
+  const dt = Math.min(0.05, (now - panLast) / 1000);
+  panLast = now;
+  cam.x -= panDir * window.innerWidth * 0.9 * dt;
+  camAnim = null;
+  camMoved = true;
+  clampCamera();
+  dirty = true;
+  requestAnimationFrame(panStep);
+}
+for (const [id, dir] of [
+  ['pan-left', -1],
+  ['pan-right', 1],
+] as const) {
+  const btn = document.getElementById(id)!;
+  btn.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    btn.setPointerCapture(e.pointerId);
+    panDir = dir;
+    panLast = performance.now();
+    requestAnimationFrame(panStep);
+  });
+  for (const type of ['pointerup', 'pointercancel', 'lostpointercapture'] as const) {
+    btn.addEventListener(type, () => (panDir = 0));
+  }
+}
+new ResizeObserver(() => {
+  clampCamera();
+  dirty = true;
+}).observe(document.getElementById('toolbar')!);
 
 function screenToCar(sx: number, sy: number): [number, number] {
   const rect = viewport.getBoundingClientRect();
@@ -2381,18 +2472,6 @@ window.addEventListener('keydown', (e) => {
   }
   if (e.key.toLowerCase() === 'r' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.repeat && !isTyping(e.target)) {
     playShake();
-    return;
-  }
-  if (
-    e.key.toLowerCase() === 'c' &&
-    brush.tool === 'spray' &&
-    !e.ctrlKey &&
-    !e.metaKey &&
-    !e.altKey &&
-    !e.repeat &&
-    !isTyping(e.target)
-  ) {
-    setCap(brush.cap === 'fat' ? 'skinny' : 'fat');
     return;
   }
   if ((e.ctrlKey || e.metaKey) && !e.altKey && !isTyping(e.target)) {
@@ -2855,10 +2934,6 @@ toolButtons.forEach((btn) =>
   }),
 );
 
-const capButtons = document.querySelectorAll<HTMLButtonElement>('#cap-options button');
-const rollerButtons = document.querySelectorAll<HTMLButtonElement>('#roller-options button');
-const capOptions = document.getElementById('cap-options')!;
-const rollerOptions = document.getElementById('roller-options')!;
 const straightLineToggle = document.getElementById('straight-line-toggle') as HTMLButtonElement;
 
 straightLineToggle.addEventListener('click', () => {
@@ -2867,26 +2942,7 @@ straightLineToggle.addEventListener('click', () => {
   straightLineToggle.blur();
 });
 
-function setCap(cap: Cap): void {
-  brush.cap = cap;
-  capButtons.forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.cap === cap)));
-  rebuildStamp();
-  dirty = true;
-}
-capButtons.forEach((b) => b.addEventListener('click', () => setCap(b.dataset.cap as Cap)));
-
-rollerButtons.forEach((b) =>
-  b.addEventListener('click', () => {
-    brush.roller = b.dataset.roller as RollerPreset;
-    rollerButtons.forEach((o) => o.setAttribute('aria-pressed', String(o === b)));
-    dirty = true;
-  }),
-);
-
-function updateToolOptions(): void {
-  capOptions.hidden = brush.tool !== 'spray';
-  rollerOptions.hidden = brush.tool !== 'roller';
-}
+function updateToolOptions(): void {}
 updateToolOptions();
 
 const focusBtn = document.getElementById('focus-btn') as HTMLButtonElement;

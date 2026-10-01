@@ -49,14 +49,6 @@
         </div>
         <div class="cluster" role="group" aria-label="Tool options">
           <div id="tool-options">
-            <div id="cap-options" class="seg" role="group" aria-label="Spray cap">
-              <button type="button" data-cap="fat" aria-pressed="true" title="Fat cap (C) – Wide, soft, dusty flare for fast fills">Fat</button>
-              <button type="button" data-cap="skinny" aria-pressed="false" title="Skinny cap (C) – Tight, crisp line for outlines and cuts">Skinny</button>
-            </div>
-            <div id="roller-options" class="seg" role="group" aria-label="Roller width" hidden>
-              <button type="button" data-roller="standard" aria-pressed="true" title="9&Prime; standard roller – Regular fill passes">9&Prime;</button>
-              <button type="button" data-roller="wide" aria-pressed="false" title="18&Prime; block roller – Massive whole-panel passes">18&Prime;</button>
-            </div>
             <button id="straight-line-toggle" class="icon straight-line-toggle" type="button" aria-pressed="false" aria-label="Straight line" title="Straight line – Click and drag to draw a line; Shift still works as a temporary modifier">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M5 19L19 5"/></svg>
             </button>
@@ -153,6 +145,11 @@
     <div id="rotate-overlay" role="alert">
       <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="16" y="6" width="16" height="28" rx="3"/><path d="M22 30h4"/><path d="M8 30a16 16 0 0 0 16 12"/><path d="M8 38v-8h8"/></svg>
       <p>Rotate device to landscape to paint</p>
+    </div>
+    <div id="view-bar" role="group" aria-label="View">
+      <button id="pan-left" type="button" aria-label="Pan left" title="Hold to slide left">&#x25C0;</button>
+      <input id="zoom-range" type="range" min="0" max="100" value="0" aria-label="Zoom" title="Zoom" />
+      <button id="pan-right" type="button" aria-label="Pan right" title="Hold to slide right">&#x25B6;</button>
     </div>
     <div id="yard-bar">
       <button id="back-dispatch" type="button" title="Save and return to the home page">&larr;<span class="bar-label"> Back to Home</span></button>
