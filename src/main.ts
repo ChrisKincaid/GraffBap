@@ -3336,10 +3336,10 @@ function toggleRollPause(): void {
     reelSel.top.pinned = null;
     if (cardSrc === 'top') showCard(-1, 'top');
   }
+  updateRollControls();
   if (roll.showcase) return;
   if (roll.paused) stopClatter();
   else startClatter(ROLL_SPEEDS[roll.speedIdx]!.rate);
-  updateRollControls();
 }
 
 function cycleRollSpeed(): void {
@@ -3461,6 +3461,9 @@ const ccPropsBtn = document.getElementById('cc-props') as HTMLButtonElement;
 const ccToyBtn = document.getElementById('cc-toy') as HTMLButtonElement;
 const ccReportBtn = document.getElementById('cc-report') as HTMLButtonElement;
 const ccCloseBtn = document.getElementById('cc-close') as HTMLButtonElement;
+const ccPrevBtn = document.getElementById('cc-prev') as HTMLButtonElement;
+const ccNextBtn = document.getElementById('cc-next') as HTMLButtonElement;
+const ccCount = document.getElementById('cc-count')!;
 const ccPaintBtn = document.getElementById('cc-paint') as HTMLButtonElement;
 const PENCIL_SVG =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20l4-1 11-11-3-3L5 16z"/><path d="M14 7l3 3"/></svg>';
@@ -3910,6 +3913,9 @@ function renderCard(e: RollEntry): void {
   renderRating(e, cardRatingUI);
   if (wip) ccTally.textContent = 'Being painted right now';
   if (e.reg?.basedOnWriter) ccBy.textContent = `${ccBy.textContent} · over ${e.reg.basedOnWriter}`;
+  const n = reelLength(cardSrc);
+  ccCount.textContent = n ? `${cardCar + 1} / ${n}` : '';
+  ccPrevBtn.disabled = ccNextBtn.disabled = n < 2;
   drawCardPreview(e);
 }
 
@@ -3959,10 +3965,41 @@ function positionCarCard(): void {
   carCard.style.top = `${bounds.top}px`;
 }
 
+// Closing the card hands the reel back to the viewer, rolling.
 ccCloseBtn.addEventListener('click', () => {
-  reelSel[cardSrc].pinned = null;
-  showCard(-1, cardSrc);
+  const src = cardSrc;
+  releaseReel(src);
+  showCard(-1, src);
 });
+
+function reelLength(src: ReelId): number {
+  return src === 'sub' ? subwayReel.entries.length : roll ? rollCount(roll) : 0;
+}
+
+function stepCard(dir: 1 | -1): void {
+  const n = reelLength(cardSrc);
+  if (cardCar < 0 || n < 2) return;
+  inspectRollingCar((cardCar + dir + n) % n, cardSrc);
+}
+
+ccPrevBtn.addEventListener('click', () => stepCard(-1));
+ccNextBtn.addEventListener('click', () => stepCard(1));
+
+// Horizontal swipe on the full-screen panel flips between cars; vertical drags still scroll.
+let swipeStart: { x: number; y: number; id: number } | null = null;
+carCard.addEventListener('pointerdown', (e) => {
+  if (!mobileCard() || (e.target as Element).closest('button')) return;
+  swipeStart = { x: e.clientX, y: e.clientY, id: e.pointerId };
+});
+carCard.addEventListener('pointerup', (e) => {
+  const s = swipeStart;
+  swipeStart = null;
+  if (!s || s.id !== e.pointerId) return;
+  const dx = e.clientX - s.x;
+  const dy = e.clientY - s.y;
+  if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) stepCard(dx < 0 ? 1 : -1);
+});
+carCard.addEventListener('pointercancel', () => (swipeStart = null));
 
 ccReportBtn.addEventListener('click', () => {
   ccReportBtn.blur();

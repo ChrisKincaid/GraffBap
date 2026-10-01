@@ -1583,7 +1583,8 @@ body.showcase .dispatch {
   font: 12px/1.4 system-ui, sans-serif;
 }
 
-.cc-preview {
+.cc-preview,
+.cc-nav {
   display: none;
 }
 
@@ -1605,7 +1606,38 @@ body.showcase .dispatch {
     background: #0b0c0f;
     overflow-y: auto;
     overscroll-behavior: contain;
+    /* Horizontal drags are ours (swipe between cars); vertical still scrolls. */
+    touch-action: pan-y;
     z-index: 30;
+  }
+
+  #car-card .cc-nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+
+  #car-card .cc-nav button {
+    min-width: 96px;
+    min-height: 44px;
+    padding: 0 14px;
+    border: 1px solid #3a3d44;
+    border-radius: 8px;
+    background: #15171b;
+    color: #e8e6e1;
+    font: 800 14px/1 ui-monospace, monospace;
+    cursor: pointer;
+  }
+
+  #car-card .cc-nav button:disabled {
+    opacity: 0.35;
+  }
+
+  #cc-count {
+    color: #8a877f;
+    font: 700 13px/1 ui-monospace, monospace;
   }
 
   #car-card .cc-preview {
