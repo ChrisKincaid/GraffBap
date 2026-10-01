@@ -329,9 +329,17 @@ body.showcase #landing {
   display: flex;
   align-items: center;
   gap: 10px;
+  overflow: hidden;
   color: #8fd18f;
   font: 600 12px/1 ui-monospace, monospace;
   letter-spacing: 0.1em;
+}
+
+.term-link {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .term-status .dot {
@@ -364,8 +372,39 @@ body.showcase #landing {
 
 .term-right {
   justify-self: end;
+  min-width: 0;
   display: flex;
   gap: 8px;
+}
+
+/* Narrow screens: drop the byline and shrink the account button so nothing can
+   spill under the centred logo. */
+@media (max-width: 760px) {
+  .term-bar {
+    gap: 8px;
+    padding: 5px 10px;
+  }
+
+  .term-status {
+    display: none;
+  }
+
+  .term-bar {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .term-logo {
+    justify-self: start;
+  }
+
+  #landing-account {
+    max-width: 46vw;
+    overflow: hidden;
+    padding: 6px 9px;
+    font-size: 11px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
 }
 
 #solo-entry {
@@ -570,6 +609,37 @@ body.showcase .dispatch {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+/* Narrow screens: shed the optional reel controls rather than let them run off the edge.
+   Selectors are scoped to .reel-head so they beat the base rules declared further down. */
+@media (max-width: 760px) {
+  .reel-head {
+    gap: 6px;
+    padding: 2px 8px;
+  }
+
+  .reel-head .reel-sort-label,
+  .reel-head .reel-description {
+    display: none;
+  }
+
+  .reel-head .reel-sort {
+    flex: 0 1 78px;
+    width: 78px;
+  }
+
+  .reel-head .reel-mine {
+    flex: 0 0 auto;
+    overflow: hidden;
+    max-width: 40vw;
+    padding: 3px 7px;
+    text-overflow: ellipsis;
+  }
+
+  .mine-show {
+    display: none;
+  }
 }
 
 .reel-arrow {
@@ -3167,6 +3237,49 @@ body.rollby #toolbar {
 
 #tos-open:hover {
   color: #ffd200;
+}
+
+/* The centred logo is absolutely positioned, so on narrow screens it would sit
+   under the Terms link. Put everything back in flow instead. */
+@media (max-width: 760px) {
+  .term-footer {
+    justify-content: space-between;
+    gap: 10px;
+    padding: 0 10px;
+    font-size: 11px;
+  }
+
+  .term-footer > a {
+    order: 0;
+    position: static;
+    transform: none;
+  }
+
+  .term-footer img {
+    height: 22px;
+  }
+
+  #tos-open {
+    order: 1;
+    margin-left: 0;
+    white-space: nowrap;
+  }
+}
+
+@media (max-width: 380px) {
+  .term-footer {
+    gap: 6px;
+    padding: 0 6px;
+    font-size: 10px;
+  }
+
+  .term-footer img {
+    height: 18px;
+  }
+
+  #tos-open {
+    letter-spacing: 0;
+  }
 }
 
 #museum-dialog {

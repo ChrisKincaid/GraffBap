@@ -13,14 +13,11 @@ import {
 } from './audio';
 import { drawBackdrop, GROUND_Y, seededRandom } from './backdrop';
 import {
-  countMuseumCars,
   countPainting,
   getRegistryCar,
   isBeingPainted,
   listFeed,
   listMine,
-  listMuseum,
-  readHofStats,
   registerDeparture,
   reportRegistryCar,
   retirePiece,
@@ -1932,6 +1929,8 @@ function finishDrips(): void {
 // ---------- Camera ----------
 const cam = { x: 0, y: 0, scale: 1 };
 let dpr = 1;
+// Phones often report 3x; the reels animate constantly, so 2x is the ceiling that keeps them smooth.
+const reelDpr = () => Math.min(dpr, 2);
 let dirty = true;
 
 // Phones/tablets in landscape with little height get a collapsible dock and a reserved strip for its toggle.
@@ -3389,6 +3388,8 @@ function drawKnuckle(ctx: CanvasRenderingContext2D, x: number): void {
 function renderRollBy(now: number): void {
   const r = roll!;
   const ctx = r.showcase ? showcaseCtx : viewCtx;
+  // The scrolling reels render every frame, so they run at capped density.
+  const px = r.showcase ? reelDpr() : dpr;
   if (r.showcase) sizeShowcaseCanvas();
   const L = activeRollLayout();
   const dt = Math.min(0.1, (now - r.lastT) / 1000);
@@ -3399,13 +3400,13 @@ function renderRollBy(now: number): void {
   else if (r.x < -L.W / L.scale) r.x = rollCount(r) * CAR_WIDTH;
 
   const rc = { x: -r.x * L.scale, y: L.bar, scale: L.scale };
-  drawBackdrop(ctx, r.showcase ? { x: 0, y: rc.y, scale: rc.scale } : rc, dpr, L.W, L.H);
+  drawBackdrop(ctx, r.showcase ? { x: 0, y: rc.y, scale: rc.scale } : rc, px, L.W, L.H);
 
-  const s = dpr * L.scale;
+  const s = px * L.scale;
   const first = Math.max(0, Math.floor(r.x / CAR_WIDTH));
   const last = Math.min(rollCount(r) - 1, Math.floor((r.x + L.W / L.scale) / CAR_WIDTH));
   for (let i = first; i <= last; i++) {
-    ctx.setTransform(s, 0, 0, s, dpr * (rc.x + i * CAR_WIDTH * L.scale), dpr * rc.y);
+    ctx.setTransform(s, 0, 0, s, px * (rc.x + i * CAR_WIDTH * L.scale), px * rc.y);
     if (!r.entries && i === currentCarIndex) {
       drawCarComposite(ctx, baseIdFor(currentYard, i), paintLayer, true);
     } else {
@@ -3415,7 +3416,7 @@ function renderRollBy(now: number): void {
     if (i > 0) drawKnuckle(ctx, 0);
   }
 
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.setTransform(px, 0, 0, px, 0, 0);
   if (r.showcase) {
     drawCrossing(ctx, L, rc.y, now);
     trackSelection(ctx, 'top', rollCount(r), (i) => rc.x + i * CAR_WIDTH * L.scale, L.scale, rc.y, L.W);
@@ -3439,13 +3440,15 @@ function renderRollBy(now: number): void {
 
 // ---------- Showcase (gallery) ----------
 const showcaseCanvas = document.getElementById('showcase-canvas') as HTMLCanvasElement;
-const showcaseCtx = showcaseCanvas.getContext('2d')!;
+// Opaque context: the backdrop covers every pixel, and skipping alpha saves compositing.
+const showcaseCtx = showcaseCanvas.getContext('2d', { alpha: false })!;
 const scPlayBtn = document.getElementById('sc-play') as HTMLButtonElement;
 const scSpeedBtn = document.getElementById('sc-speed') as HTMLButtonElement;
 
 function sizeShowcaseCanvas(): void {
-  const w = Math.max(1, Math.round(showcaseCanvas.clientWidth * dpr));
-  const h = Math.max(1, Math.round(showcaseCanvas.clientHeight * dpr));
+  const d = reelDpr();
+  const w = Math.max(1, Math.round(showcaseCanvas.clientWidth * d));
+  const h = Math.max(1, Math.round(showcaseCanvas.clientHeight * d));
   if (showcaseCanvas.width !== w) showcaseCanvas.width = w;
   if (showcaseCanvas.height !== h) showcaseCanvas.height = h;
 }
@@ -4069,8 +4072,7 @@ function castRegistryVote(e: RollEntry, kind: VoteKind, done: () => void): void 
       if (r.already) showToast(kind === 'props' ? 'You already dropped props on this car.' : 'You already called this one whack.');
       else if (!roll?.showcase) (kind === 'props' ? playPuff : playPeel)();
       if (r.promoted) {
-        showToast(`Hall of Fame â€“ ${e.writer}'s piece just got inducted.`, 4000);
-        void refreshMuseumBtn();
+        showToast(`Hall of Fame – ${e.writer}'s piece just got inducted.`, 4000);
       }
       done();
     })
@@ -4245,7 +4247,10 @@ function renderMyWorkBtn(id: ReelId): void {
   const on = myWork[id];
   const btn = myWorkBtns[id];
   btn.setAttribute('aria-pressed', String(on));
-  btn.textContent = on ? 'Show All Work' : 'Show My Work';
+  const show = document.createElement('span');
+  show.className = 'mine-show';
+  show.textContent = 'Show ';
+  btn.replaceChildren(show, document.createTextNode(on ? 'All Work' : 'My Work'));
   btn.title = on ? 'Show every writer\u2019s cars' : 'Show only the cars you painted';
 }
 
@@ -4733,7 +4738,6 @@ function applyRoute(): void {
     if (roll && !roll.showcase) exitRollBy(-1);
     if (!roll) void startMainline();
     startSubwayLine();
-    void refreshMuseumBtn();
   } else {
     // Tear the landing reel down so the editor underneath is revealed.
     if (roll?.showcase) exitRollBy(-1);
@@ -4828,7 +4832,7 @@ window.addEventListener('hashchange', applyRoute);
 
 // ---------- Subway Line: westbound (right-to-left) tunnel reel on Dispatch ----------
 const subwayCanvas = document.getElementById('subway-canvas') as HTMLCanvasElement;
-const subwayCtx = subwayCanvas.getContext('2d')!;
+const subwayCtx = subwayCanvas.getContext('2d', { alpha: false })!;
 const subwayTitle = document.getElementById('subway-title')!;
 const SUBWAY_LINE_SIZE = 12;
 const subwayReel = {
@@ -4969,8 +4973,9 @@ function drawTunnel(ctx: CanvasRenderingContext2D, W: number, H: number, railY: 
 function renderSubwayReel(now: number): void {
   const W = Math.max(1, subwayCanvas.clientWidth);
   const H = Math.max(1, subwayCanvas.clientHeight);
-  const pw = Math.round(W * dpr);
-  const ph = Math.round(H * dpr);
+  const px = reelDpr();
+  const pw = Math.round(W * px);
+  const ph = Math.round(H * px);
   if (subwayCanvas.width !== pw) subwayCanvas.width = pw;
   if (subwayCanvas.height !== ph) subwayCanvas.height = ph;
   const scale = Math.min((H - 16) / (EXPORT_CROP.h + 10), (W * CAR_FIT) / CAR_WIDTH);
@@ -4988,17 +4993,17 @@ function renderSubwayReel(now: number): void {
   subGeom = { W, scale, trainW };
 
   const ctx = subwayCtx;
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.setTransform(px, 0, 0, px, 0, 0);
   drawTunnel(ctx, W, H, railY);
-  const s = dpr * scale;
+  const s = px * scale;
   subwayReel.entries.forEach((e, i) => {
     const x = subwayReel.sx + i * CAR_WIDTH * scale;
     if (x > W || x + CAR_WIDTH * scale < 0) return;
-    ctx.setTransform(s, 0, 0, s, dpr * x, dpr * oy);
+    ctx.setTransform(s, 0, 0, s, px * x, px * oy);
     drawCarComposite(ctx, entryBaseId(e), subwayReel.images[i] ?? null, false);
     if (i > 0) drawKnuckle(ctx, 0);
   });
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.setTransform(px, 0, 0, px, 0, 0);
   const shade = ctx.createLinearGradient(0, 0, W, 0);
   shade.addColorStop(0, 'rgba(0,0,0,0.55)');
   shade.addColorStop(0.12, 'rgba(0,0,0,0)');
@@ -5008,66 +5013,6 @@ function renderSubwayReel(now: number): void {
   ctx.fillRect(0, 0, W, H);
 
   trackSelection(ctx, 'sub', subwayReel.entries.length, (i) => subwayReel.sx + i * CAR_WIDTH * scale, scale, oy, W);
-}
-
-// ---------- The Museum / Black Book ----------
-const museumDialog = document.getElementById('museum-dialog') as HTMLDialogElement;
-const museumGrid = document.getElementById('museum-grid')!;
-const museumHof = document.getElementById('museum-hof')!;
-
-async function openMuseum(): Promise<void> {
-  museumGrid.replaceChildren();
-  museumGrid.dataset.state = 'loading';
-  museumDialog.showModal();
-  try {
-    const [cars, hof] = await Promise.all([listMuseum(60), readHofStats()]);
-    museumHof.textContent = `Hall of Fame bar: ${hof.threshold} net props Â· ${hof.hofTotal} inducted`;
-    museumGrid.dataset.state = cars.length ? '' : 'empty';
-    for (const c of cars) {
-      const e = regEntry(c);
-      if (!e) continue;
-      const card = document.createElement('button');
-      card.type = 'button';
-      card.className = 'museum-card';
-      const img = document.createElement('img');
-      img.src = c.image;
-      img.alt = `Car by ${c.writer}`;
-      img.loading = 'lazy';
-      const who = document.createElement('b');
-      who.textContent = c.writer || 'Anonymous';
-      const meta = document.createElement('span');
-      meta.textContent = `${c.status === 'hall_of_fame' ? 'HALL OF FAME' : 'MUSEUM'} Â· ${c.net} net Â· ${YARDS[e.yard as YardId].label}`;
-      card.append(img, who, meta);
-      card.addEventListener('click', () => {
-        museumDialog.close();
-        openBenchEntry(e);
-      });
-      museumGrid.append(card);
-    }
-  } catch (err) {
-    console.error('Museum load failed', err);
-    museumGrid.dataset.state = 'error';
-  }
-}
-document.getElementById('museum-btn')!.addEventListener('click', () => void openMuseum());
-document.getElementById('museum-close')!.addEventListener('click', () => museumDialog.close());
-
-const museumBtn = document.getElementById('museum-btn') as HTMLButtonElement;
-const museumWrap = document.getElementById('museum-wrap')!;
-const MUSEUM_EMPTY_TIP = 'The Museum is currently empty. Doors open when the Hall of Fame overflows.';
-
-// The Museum only opens once the Hall of Fame has overflowed at least one car into it.
-async function refreshMuseumBtn(): Promise<void> {
-  let count = 0;
-  try {
-    count = await countMuseumCars();
-  } catch (err) {
-    console.error('Museum count failed', err);
-  }
-  museumBtn.disabled = count === 0;
-  // Disabled buttons swallow hover in some browsers, so the tip lives on the wrapper.
-  museumWrap.title = count === 0 ? MUSEUM_EMPTY_TIP : '';
-  museumBtn.title = count === 0 ? '' : `The Museum â€“ ${count} archived legend${count === 1 ? '' : 's'}`;
 }
 
 // ---------- Session: aerosol gauge + the "still working?" idle check ----------

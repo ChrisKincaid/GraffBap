@@ -185,7 +185,6 @@
         <div class="term-status"><span class="dot" aria-hidden="true"></span><a class="term-link" href="https://boxbap.com" target="_blank" rel="noopener noreferrer">Brought to you by BoxBap.com</a></div>
         <div class="term-logo">GraffBap</div>
         <div class="term-right">
-          <span id="museum-wrap" title="The Museum is currently empty. Doors open when the Hall of Fame overflows."><button id="museum-btn" type="button" disabled>Museum</button></span>
           <button id="landing-account" type="button">Sign In with BoxBap.com</button>
         </div>
       </header>
@@ -194,7 +193,7 @@
           <span id="reel-title" class="reel-title">THE MAINLINE Â· TOP-RATED</span>
           <span id="reel-description" class="reel-description"></span>
           <button id="sc-play" class="reel-control-play" type="button" aria-label="Pause" title="Pause">&#x23F8;</button>
-          <span class="reel-speed-control"><span>Speed</span><button id="sc-speed" class="reel-control-speed" type="button" title="Speed 1x">1x</button></span>
+          <button id="sc-speed" class="reel-control-speed" type="button" title="Speed 1x">1x</button>
           <span class="reel-sort-label">Sort by</span><select id="sc-sort" class="reel-sort" aria-label="Sort Freight cars"><option value="top">Best rated</option><option value="grave">Worst rated</option><option value="latest">Latest</option><option value="oldest">Oldest</option><option value="random">Random</option><option value="painting">Currently painting</option></select>
           <button id="sc-mine" class="reel-mine" type="button" aria-pressed="false" title="Show only the cars you painted">Show My Work</button>
           <button id="reel-back" class="reel-back" type="button" hidden>Back to Mainline</button>
@@ -212,7 +211,7 @@
           <span id="subway-title" class="reel-title">THE SUBWAY LINE</span>
           <span id="sub-description" class="reel-description"></span>
           <button id="sub-play" class="reel-control-play" type="button" aria-label="Pause" title="Pause">&#x23F8;</button>
-          <span class="reel-speed-control"><span>Speed</span><button id="sub-speed" class="reel-control-speed" type="button" title="Speed 1x">1x</button></span>
+          <button id="sub-speed" class="reel-control-speed" type="button" title="Speed 1x">1x</button>
           <span class="reel-sort-label">Sort by</span><select id="sub-sort" class="reel-sort" aria-label="Sort Subway cars"><option value="top">Best rated</option><option value="grave">Worst rated</option><option value="latest">Latest</option><option value="oldest">Oldest</option><option value="random">Random</option><option value="painting">Currently painting</option></select>
           <button id="sub-mine" class="reel-mine" type="button" aria-pressed="false" title="Show only the cars you painted">Show My Work</button>
           <button id="sub-back" class="reel-back" type="button" hidden>Back to Subway Line</button>
@@ -226,14 +225,6 @@
         <button id="tos-open" type="button">Terms of Service</button>
       </footer>
     </div>
-    <dialog id="museum-dialog" aria-labelledby="museum-title">
-      <header class="museum-head">
-        <h2 id="museum-title">THE MUSEUM Â· BLACK BOOK</h2>
-        <span id="museum-hof"></span>
-        <button id="museum-close" type="button">Close</button>
-      </header>
-      <div id="museum-grid"></div>
-    </dialog>
     <dialog id="tos-dialog" aria-labelledby="tos-title">
       <h2 id="tos-title">Terms of Service</h2>
       <ul>
