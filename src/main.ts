@@ -911,7 +911,7 @@ function finishSwap(token: number): void {
 }
 
 // ---------- Brush state ----------
-type Tool = 'spray' | 'roller' | 'paintball' | 'mop' | 'chisel' | 'buff';
+type Tool = 'spray' | 'roller' | 'paintball' | 'mop' | 'chisel' | 'buff' | 'stamp';
 type Cap = 'fat' | 'skinny';
 type RollerPreset = 'standard' | 'wide';
 const brush = {
@@ -2028,8 +2028,8 @@ function syncViewBar(): void {
   const span = Math.log(hi / lo);
   zoomRange.disabled = span < 0.01;
   zoomRange.value = String(span < 0.01 ? 0 : Math.round((Math.log(cam.scale / lo) / span) * 100));
-  const { bottom } = paintRegion();
-  viewBar.style.top = `${Math.min(bottom + 8, cam.y + CAR_HEIGHT * cam.scale + 6)}px`;
+  // Pinned just above the tool dock so it never moves while you zoom.
+  viewBar.style.top = `${paintRegion().bottom + 8}px`;
 }
 
 zoomRange.addEventListener('input', () => {
@@ -2225,6 +2225,15 @@ viewport.addEventListener('pointerdown', (e) => {
     chalkAt(x, y);
     sketchHas = true;
     dirty = true;
+  } else if (e.button === 0 && brush.tool === 'stamp') {
+    // One finger only: touching the car just moves the stamp preview; the STAMP button paints it.
+    const [x, y] = screenToCar(e.clientX, e.clientY);
+    stampPos = { x, y };
+    stampPointer = e.pointerId;
+    viewport.setPointerCapture(e.pointerId);
+    e.preventDefault();
+    dirty = true;
+    return;
   } else if (e.button === 0) {
     if (locked()) return;
     mode = 'paint';
@@ -2440,7 +2449,7 @@ window.addEventListener('keydown', (e) => {
     nudgeSize(e.key === ']' ? 1 : -1);
     return;
   }
-  if (plain && !e.repeat && e.key >= '1' && e.key <= '6' && e.key.length === 1) {
+  if (plain && !e.repeat && e.key >= '1' && e.key <= '5' && e.key.length === 1) {
     selectTool(TOOL_KEYS[Number(e.key) - 1]!);
     return;
   }
@@ -2561,16 +2570,30 @@ function pickColor(hex: string): void {
 }
 
 const SWATCHES: [string, string][] = [
-  ['Burner Chrome', '#e8ecef'],
-  ['Pitch Black', '#0a0a0a'],
   ['Shock White', '#ffffff'],
+  ['Burner Chrome', '#e8ecef'],
+  ['Concrete Grey', '#8a8d91'],
+  ['Pitch Black', '#0a0a0a'],
+  ['Bubblegum Pink', '#ff5fa2'],
+  ['Hot Magenta', '#e0218a'],
   ['Flame Red', '#d62226'],
+  ['Blood Red', '#8b0d16'],
+  ['Coral', '#ff7a59'],
   ['Hazard Orange', '#ff6600'],
-  ['Signal Yellow', '#ffd200'],
-  ['Electric Lime', '#84cc16'],
-  ['Deep Marine Blue', '#1d4ed8'],
-  ['Royal Violet', '#7c3aed'],
+  ['Burnt Orange', '#c2410c'],
   ['Rust Oxide', '#8b3a2b'],
+  ['Butter Yellow', '#ffe680'],
+  ['Signal Yellow', '#ffd200'],
+  ['Mustard', '#c99a06'],
+  ['Electric Lime', '#84cc16'],
+  ['Kelly Green', '#16a34a'],
+  ['Forest Green', '#14532d'],
+  ['Mint', '#6ee7b7'],
+  ['Teal', '#0d9488'],
+  ['Sky Blue', '#38bdf8'],
+  ['Deep Marine Blue', '#1d4ed8'],
+  ['Navy', '#1e1b4b'],
+  ['Royal Violet', '#7c3aed'],
 ];
 const swatchBox = document.getElementById('swatches')!;
 for (const [name, hex] of SWATCHES) {
@@ -2763,7 +2786,7 @@ document.getElementById('sketch-clear')!.addEventListener('click', (e) => {
   dirty = true;
 });
 
-const TOOL_KEYS: Tool[] = ['spray', 'roller', 'mop', 'chisel', 'paintball', 'buff'];
+const TOOL_KEYS: Tool[] = ['spray', 'roller', 'mop', 'paintball', 'buff'];
 
 function selectTool(tool: Tool): void {
   if (mode !== 'none') return;
@@ -2942,7 +2965,118 @@ straightLineToggle.addEventListener('click', () => {
   straightLineToggle.blur();
 });
 
-function updateToolOptions(): void {}
+function updateToolOptions(): void {
+  stampOptions.hidden = brush.tool !== 'stamp';
+}
+
+// ---------- Stamps ----------
+// Shapes are SVG paths in a 24x24 box; every one is filled even-odd so holes (ring, eyes) cut through.
+const STAMPS: [string, string][] = [
+  ['Circle', 'M12 2a10 10 0 1 0 0 20a10 10 0 1 0 0-20z'],
+  ['Square', 'M3 3h18v18H3z'],
+  ['Triangle', 'M12 2l10 18H2z'],
+  ['Diamond', 'M12 1l10 11-10 11L2 12z'],
+  ['Star', 'M12 1l3.1 7 7.6.7-5.8 5 1.8 7.5L12 17.3 5.3 21.2l1.8-7.5-5.8-5 7.6-.7z'],
+  ['Heart', 'M12 21C1 13 2.5 3 8 3c2 0 3.2 1.2 4 2.5C12.8 4.2 14 3 16 3c5.5 0 7 10-4 18z'],
+  ['Hexagon', 'M7 2h10l5 10-5 10H7L2 12z'],
+  ['Ring', 'M12 2a10 10 0 1 0 0 20a10 10 0 1 0 0-20zM12 6.5a5.5 5.5 0 1 1 0 11a5.5 5.5 0 1 1 0-11z'],
+  ['Plus', 'M9 2h6v7h7v6h-7v7H9v-7H2V9h7z'],
+  ['Arrow', 'M2 9h11V3l9 9-9 9v-6H2z'],
+  ['Lightning', 'M14 1L4 14h7l-2 9 10-13h-7z'],
+  ['Moon', 'M15 2a10 10 0 1 0 7 15A8 8 0 0 1 15 2z'],
+  ['Drop', 'M12 1C8 7 4 11 4 15a8 8 0 0 0 16 0c0-4-4-8-8-14z'],
+  ['Cloud', 'M6 19a5 5 0 0 1-.6-10A7 7 0 0 1 19 8.5 5.3 5.3 0 0 1 18.5 19z'],
+  ['Crown', 'M2 19l1-13 5 5 4-8 4 8 5-5 1 13z'],
+  ['Flower', 'M12 2a3.5 3.5 0 0 1 3.4 4.4A3.5 3.5 0 1 1 19 12.5a3.5 3.5 0 1 1-3.6 5.1A3.5 3.5 0 1 1 8.6 17.6a3.5 3.5 0 1 1-3.6-5.1 3.5 3.5 0 1 1 3.6-6.1A3.5 3.5 0 0 1 12 2z'],
+  ['Ghost', 'M4 22V11a8 8 0 0 1 16 0v11l-2.7-2.5L14.7 22 12 19.5 9.3 22 6.7 19.5zM9 9a1.6 1.6 0 1 0 0 3.2A1.6 1.6 0 1 0 9 9zM15 9a1.6 1.6 0 1 0 0 3.2A1.6 1.6 0 1 0 15 9z'],
+  ['Rabbit', 'M8 1c1.8 0 2.3 3 2.3 7a6.5 6.5 0 0 1 3.4 0c0-4 .5-7 2.3-7s2.2 4 1.2 8A7 7 0 1 1 6.8 9C5.8 5 6.2 1 8 1zM9.5 13a1.3 1.3 0 1 0 0 2.6A1.3 1.3 0 1 0 9.5 13zM14.5 13a1.3 1.3 0 1 0 0 2.6A1.3 1.3 0 1 0 14.5 13z'],
+  ['Skull', 'M12 1a9.5 9.5 0 0 0-6 16.9V22h12v-4.1A9.5 9.5 0 0 0 12 1zM8 9a2.3 2.3 0 1 0 0 4.6A2.3 2.3 0 1 0 8 9zM16 9a2.3 2.3 0 1 0 0 4.6A2.3 2.3 0 1 0 16 9zM12 14l-1.5 3h3z'],
+  ['Smiley', 'M12 1a11 11 0 1 0 0 22a11 11 0 1 0 0-22zM8 7.5a1.6 1.6 0 1 0 0 3.2A1.6 1.6 0 1 0 8 7.5zM16 7.5a1.6 1.6 0 1 0 0 3.2A1.6 1.6 0 1 0 16 7.5zM6.5 13.5h11a5.5 5.5 0 0 1-11 0z'],
+  ['Paw', 'M12 11c4 0 7 5 6 8s-4 2-6 2-5 1-6-2 2-8 6-8zM5 6.5a2 2.5 0 1 0 0 5a2 2.5 0 1 0 0-5zM19 6.5a2 2.5 0 1 0 0 5a2 2.5 0 1 0 0-5zM9 2a2 2.6 0 1 0 0 5.2A2 2.6 0 1 0 9 2zM15 2a2 2.6 0 1 0 0 5.2A2 2.6 0 1 0 15 2z'],
+  ['Spray Can', 'M8 7h8v15H8zM10 3h4v4h-4zM17 2h2v1.5h-2zM17 5h2v1.5h-2zM20 3.5h2V5h-2z'],
+];
+// Paths are authored in a 24-unit box; rescale them to a unit-radius shape centred on 0,0.
+const stampPaths = STAMPS.map(([, d]) => {
+  const p = new Path2D();
+  p.addPath(new Path2D(d), new DOMMatrix().scale(1 / 11).translate(-12, -12));
+  return p;
+});
+let stampKind = 0;
+let stampAngle = 0;
+let stampPos: { x: number; y: number } | null = null;
+let stampPointer = -1;
+const stampOptions = document.getElementById('stamp-options')!;
+// Car space is ~20 units to the inch, so the size slider spans a 2" to 30" stamp.
+const stampSize = () => 40 + sizeT() * 560;
+
+function withStamp(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, draw: (p: Path2D) => void): void {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate((stampAngle * Math.PI) / 180);
+  ctx.scale(r, r);
+  draw(stampPaths[stampKind]!);
+  ctx.restore();
+}
+
+function pressStamp(): void {
+  if (!stampPos || mode !== 'none' || locked()) {
+    if (!stampPos) showNotice('Tap the car to place the stamp');
+    return;
+  }
+  pushHistory();
+  paintCtx.globalAlpha = brush.opacity;
+  paintCtx.fillStyle = brush.color;
+  withStamp(paintCtx, stampPos.x, stampPos.y, stampSize() / 2, (p) => paintCtx.fill(p, 'evenodd'));
+  paintCtx.globalAlpha = 1;
+  car().hasPaint = true;
+  updateConsistUI();
+  scheduleSave();
+  dirty = true;
+}
+
+function drawStampPreview(): void {
+  if (brush.tool !== 'stamp' || !stampPos) return;
+  const r = Math.max(2, (stampSize() / 2) * cam.scale);
+  withStamp(viewCtx, cam.x + stampPos.x * cam.scale, cam.y + stampPos.y * cam.scale, r, (p) => {
+    viewCtx.globalAlpha = 0.45;
+    viewCtx.fillStyle = brush.color;
+    viewCtx.fill(p, 'evenodd');
+    viewCtx.globalAlpha = 1;
+    viewCtx.lineWidth = 2 / r;
+    viewCtx.setLineDash([6 / r, 4 / r]);
+    viewCtx.strokeStyle = '#ffd200';
+    viewCtx.stroke(p);
+  });
+}
+
+viewport.addEventListener('pointermove', (e) => {
+  if (e.pointerId !== stampPointer) return;
+  const [x, y] = screenToCar(e.clientX, e.clientY);
+  stampPos = { x, y };
+  dirty = true;
+});
+for (const type of ['pointerup', 'pointercancel'] as const) {
+  viewport.addEventListener(type, (e) => {
+    if (e.pointerId === stampPointer) stampPointer = -1;
+  });
+}
+
+const stampKindSelect = document.getElementById('stamp-kind') as HTMLSelectElement;
+STAMPS.forEach(([name], i) => stampKindSelect.add(new Option(name, String(i))));
+stampKindSelect.addEventListener('change', () => {
+  stampKind = Number(stampKindSelect.value);
+  stampKindSelect.blur();
+  dirty = true;
+});
+const stampRotate = document.getElementById('stamp-rotate') as HTMLInputElement;
+stampRotate.addEventListener('input', () => {
+  stampAngle = Number(stampRotate.value);
+  dirty = true;
+});
+document.getElementById('stamp-go')!.addEventListener('click', (e) => {
+  (e.currentTarget as HTMLElement).blur();
+  pressStamp();
+});
 updateToolOptions();
 
 const focusBtn = document.getElementById('focus-btn') as HTMLButtonElement;
@@ -2961,16 +3095,14 @@ const SPEAKER_PATH = '<path d="M4 9v6h4l5 4V5L8 9z"/>';
 const SOUND_ON_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true">${SPEAKER_PATH}<path d="M16 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11"/></svg>`;
 const SOUND_OFF_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true">${SPEAKER_PATH}<path d="M17 9l5 6M22 9l-5 6"/></svg>`;
 const muteBtn = document.getElementById('mute-btn') as HTMLButtonElement;
-let soundMuted = false;
+// The site is silent: sound stays off and the mute toggle is retired.
+let soundMuted = true;
+setMuted(true);
 function renderMute(): void {
   muteBtn.innerHTML = soundMuted ? SOUND_OFF_ICON : SOUND_ON_ICON;
   muteBtn.setAttribute('aria-pressed', String(soundMuted));
 }
-function toggleMute(): void {
-  soundMuted = !soundMuted;
-  setMuted(soundMuted);
-  renderMute();
-}
+function toggleMute(): void {}
 muteBtn.addEventListener('click', toggleMute);
 renderMute();
 
@@ -5721,7 +5853,7 @@ function render(): void {
       viewCtx.setLineDash([]);
     }
 
-    if (hover && mode !== 'pan' && !spaceDown) {
+    if (hover && mode !== 'pan' && !spaceDown && brush.tool !== 'stamp') {
       viewCtx.beginPath();
       if (sketchMode || brush.tool === 'spray' || brush.tool === 'mop' || brush.tool === 'buff') {
         const d = sketchMode
@@ -5752,6 +5884,7 @@ function render(): void {
       }
       viewCtx.stroke();
     }
+    drawStampPreview();
   }
   requestAnimationFrame(render);
 }
