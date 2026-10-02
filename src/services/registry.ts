@@ -229,7 +229,8 @@ export async function listFeed(division: 'freight' | 'subway', sort: FeedSort, n
   if (sort === 'painting') {
     return run(where('updatedAt', '>', Date.now() - PAINTING_WINDOW_MS), orderBy('updatedAt', 'desc'), limit(n));
   }
-  if (sort === 'latest') return run(orderBy('departedAt', 'desc'), limit(n));
+  // Latest = most recently posted or re-posted, so edited pieces come back to the front.
+  if (sort === 'latest') return run(orderBy('updatedAt', 'desc'), limit(n));
   if (sort === 'oldest') return run(orderBy('departedAt', 'asc'), limit(n));
   if (sort !== 'random') return run(orderBy('net', sort === 'top' ? 'desc' : 'asc'), limit(n));
   const r = Math.random();

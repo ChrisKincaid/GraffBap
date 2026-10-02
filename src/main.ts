@@ -15,7 +15,6 @@ import { drawBackdrop, GROUND_Y, seededRandom } from './backdrop';
 import {
   countPainting,
   getRegistryCar,
-  isBeingPainted,
   listFeed,
   listMine,
   registerDeparture,
@@ -3042,9 +3041,10 @@ stampRotate.addEventListener('input', () => {
 });
 stampSizeInput.addEventListener('input', () => (dirty = true));
 
-const rollerRotate = document.getElementById('roller-rotate') as HTMLInputElement;
-rollerRotate.addEventListener('input', () => {
-  rollerAngle = (Number(rollerRotate.value) * Math.PI) / 180;
+const rollerAngleSelect = document.getElementById('roller-angle') as HTMLSelectElement;
+rollerAngleSelect.addEventListener('change', () => {
+  rollerAngleSelect.blur();
+  rollerAngle = (Number(rollerAngleSelect.value) * Math.PI) / 180;
   dirty = true;
 });
 
@@ -3224,7 +3224,16 @@ function saveNow(body: HTMLCanvasElement = copyBody()): void {
       if (result === 'published') {
         clearTimeout(retryTimer);
         if (uploadFailing) showToast('Back online – your piece is saved');
-        else showToast('Saved ✓');
+        else if (location.hash === '#yard') {
+          const reel = YARDS[yard].division === 'subway' ? 'sub' : 'top';
+          showToast(`Posted to the ${YARDS[yard].label.toLowerCase()}! 🚃`, 5000, {
+            label: 'View',
+            run: () => {
+              reloadReel(reel);
+              location.hash = '#gallery';
+            },
+          });
+        }
         uploadFailing = false;
         // Leaving the editor saves on the way out; refresh the line once the piece has landed.
         if (location.hash !== '#yard') reloadReel(YARDS[yard].division === 'subway' ? 'sub' : 'top');
@@ -4182,11 +4191,9 @@ function renderCard(e: RollEntry): void {
   ccBy.title = writer || '';
   const painted = entryPainted(e);
   const reported = !!e.reg && hasReported(e.reg.id);
-  // A car touched in the last couple of minutes is still being worked on, so it can't be rated.
-  const wip = !!e.reg && isBeingPainted(e.reg);
   const mine = !!e.reg?.writerUid && e.reg.writerUid === currentUser?.uid;
-  ccPropsBtn.disabled = !painted || wip;
-  ccToyBtn.disabled = !painted || wip;
+  ccPropsBtn.disabled = !painted;
+  ccToyBtn.disabled = !painted;
   // Report always stays live so a car can't be held unreportable by painting on it.
   ccReportBtn.disabled = !painted || reported;
   ccReportBtn.title = reported ? 'Already reported' : 'Report this car to moderators';
@@ -4194,10 +4201,10 @@ function renderCard(e: RollEntry): void {
   renderPaintBtn(mine);
   ccPropsCount.textContent = String(entryProps(e, meta));
   renderRating(e, cardRatingUI);
-  if (wip) ccTally.textContent = 'Being painted right now';
   if (e.reg?.basedOnWriter) ccBy.textContent = `${ccBy.textContent} · over ${e.reg.basedOnWriter}`;
   const n = reelLength(cardSrc);
-  ccCount.textContent = n ? `${cardCar + 1} / ${n}` : '';
+  // The top line is stored reversed (see startReel), so number it from the leading car.
+  ccCount.textContent = n ? `${cardSrc === 'top' ? n - cardCar : cardCar + 1} / ${n}` : '';
   ccPrevBtn.disabled = ccNextBtn.disabled = n < 2;
   drawCardPreview(e);
 }
@@ -4262,7 +4269,8 @@ function reelLength(src: ReelId): number {
 function stepCard(dir: 1 | -1): void {
   const n = reelLength(cardSrc);
   if (cardCar < 0 || n < 2) return;
-  inspectRollingCar((cardCar + dir + n) % n, cardSrc);
+  const step = cardSrc === 'top' ? -dir : dir;
+  inspectRollingCar((cardCar + step + n) % n, cardSrc);
 }
 
 ccPrevBtn.addEventListener('click', () => stepCard(-1));
@@ -4635,6 +4643,8 @@ async function buildMainline(): Promise<RollEntry[]> {
 }
 function startReel(entries: RollEntry[], title: string, yardLine: boolean): void {
   if (roll && !roll.showcase) return;
+  // The top line rolls left-to-right, so the last car enters first: flip it so the feed's first car leads.
+  entries = [...entries].reverse();
   resetReelSel('top');
   reelTitle.textContent = title;
   reelBackBtn.hidden = !yardLine;
@@ -5086,7 +5096,8 @@ function applyRoute(): void {
     sessionStorage.removeItem(SESSION_KEY);
     if (roll && !roll.showcase) exitRollBy(-1);
     if (!roll) void startMainline();
-    startSubwayLine();
+    // Always refetch so a car just posted from the editor shows up on the line.
+    loadSubwayLine(subwayReel.yard);
   } else {
     // Tear the landing reel down so the editor underneath is revealed.
     if (roll?.showcase) exitRollBy(-1);
@@ -5232,10 +5243,6 @@ async function buildMySubwayLine(): Promise<{ entries: RollEntry[]; images: (Can
   }
 }
 
-function startSubwayLine(): void {
-  if (!subwayReel.started) loadSubwayLine(null);
-}
-
 function loadSubwayLine(yard: YardId | null): void {
   subwayReel.started = true;
   const token = ++subwayReel.token;
@@ -5373,6 +5380,7 @@ function renderSubwayReel(now: number): void {
 
 // ---------- Session: the "still working?" idle check ----------
 const IDLE_WARN_MS = 9.5 * 60_000;
+const postBtn = document.getElementById('save-car')!;
 const IDLE_EXIT_MS = 10 * 60_000;
 let lastActivity = Date.now();
 
@@ -5396,6 +5404,7 @@ function yardStrokeStart(): void {
 
 function yardTick(): void {
   const inYard = location.hash === '#yard';
+  postBtn.classList.toggle('pending', savePending && !practiceMode);
 
   // Practice holds nothing, so it never gets timed out.
   if (inYard && !roll && !practiceMode) {
@@ -5431,8 +5440,18 @@ let exporting = false;
 const toast = document.getElementById('toast')!;
 let toastTimer = 0;
 
-function showToast(text: string, holdMs = 2500): void {
+function showToast(text: string, holdMs = 2500, action?: { label: string; run: () => void }): void {
   toast.textContent = text;
+  if (action) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = action.label;
+    b.addEventListener('click', () => {
+      toast.hidden = true;
+      action.run();
+    });
+    toast.append(b);
+  }
   toast.hidden = false;
   clearTimeout(toastTimer);
   if (holdMs > 0) toastTimer = window.setTimeout(() => (toast.hidden = true), holdMs);
@@ -5588,6 +5607,7 @@ function exportTrain(): void {
 document.getElementById('export-car')!.addEventListener('click', (e) => {
   (e.currentTarget as HTMLElement).blur();
   exportCar();
+  showToast('Image saved to your device');
 });
 document.getElementById('rollby-export')!.addEventListener('click', (e) => {
   (e.currentTarget as HTMLElement).blur();
