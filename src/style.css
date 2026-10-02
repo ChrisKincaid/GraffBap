@@ -1009,6 +1009,65 @@ body.showcase .dispatch {
   margin-right: 296px;
 }
 
+/* Graffiti loader: a shaking can spraying a drippy tag while the line-up downloads. */
+.reel-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  pointer-events: none;
+}
+
+.reel-loading[hidden] {
+  display: none;
+}
+
+.reel-loading svg {
+  width: 30px;
+  height: 30px;
+  fill: #ffd200;
+  transform-origin: 50% 80%;
+  animation: can-shake 0.35s ease-in-out infinite alternate;
+}
+
+.reel-loading span {
+  font: 400 clamp(18px, 5vw, 30px) / 1 'Permanent Marker', 'Bangers', Impact, sans-serif;
+  letter-spacing: 0.06em;
+  color: #ff3fa4;
+  text-shadow:
+    2px 2px 0 #111,
+    0 0 10px rgba(255, 63, 164, 0.6);
+  background: linear-gradient(90deg, #ff3fa4, #ffd200, #39e1ff, #ff3fa4) 0 0 / 300% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: tag-spray 1.6s linear infinite;
+}
+
+@keyframes can-shake {
+  from {
+    transform: rotate(-14deg);
+  }
+  to {
+    transform: rotate(14deg);
+  }
+}
+
+@keyframes tag-spray {
+  to {
+    background-position: 300% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reel-loading svg,
+  .reel-loading span {
+    animation: none;
+  }
+}
+
 .reel-track canvas {
   display: block;
   width: 100%;

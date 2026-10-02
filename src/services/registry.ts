@@ -10,6 +10,7 @@ import {
   query,
   runTransaction,
   setDoc,
+  startAfter,
   where,
   writeBatch,
   type QueryConstraint,
@@ -222,17 +223,35 @@ export async function reportRegistryCar(id: string, uid: string): Promise<'alrea
   });
 }
 
-export async function listFeed(division: 'freight' | 'subway', sort: FeedSort, n: number): Promise<RegistryCar[]> {
+// Cars carry their artwork inline, so a full line is megabytes: onFirst gets a small first
+// page right away so the reel can start rolling while the rest downloads.
+const FIRST_PAGE = 3;
+
+export async function listFeed(
+  division: 'freight' | 'subway',
+  sort: FeedSort,
+  n: number,
+  onFirst?: (cars: RegistryCar[]) => void,
+): Promise<RegistryCar[]> {
   const base: QueryConstraint[] = [where('division', '==', division), where('status', 'in', ROLLING)];
   const run = async (...extra: QueryConstraint[]) =>
     (await getDocs(query(collection(db, CARS), ...base, ...extra))).docs.map((d) => toCar(d.id, d.data()));
+  const paged = async (...order: QueryConstraint[]) => {
+    if (!onFirst || n <= FIRST_PAGE) return run(...order, limit(n));
+    const first = await getDocs(query(collection(db, CARS), ...base, ...order, limit(FIRST_PAGE)));
+    const head = first.docs.map((d) => toCar(d.id, d.data()));
+    onFirst(head);
+    const last = first.docs[first.docs.length - 1];
+    if (!last || first.size < FIRST_PAGE) return head;
+    return [...head, ...(await run(...order, startAfter(last), limit(n - FIRST_PAGE)))];
+  };
   if (sort === 'painting') {
-    return run(where('updatedAt', '>', Date.now() - PAINTING_WINDOW_MS), orderBy('updatedAt', 'desc'), limit(n));
+    return paged(where('updatedAt', '>', Date.now() - PAINTING_WINDOW_MS), orderBy('updatedAt', 'desc'));
   }
   // Latest = most recently posted or re-posted, so edited pieces come back to the front.
-  if (sort === 'latest') return run(orderBy('updatedAt', 'desc'), limit(n));
-  if (sort === 'oldest') return run(orderBy('departedAt', 'asc'), limit(n));
-  if (sort !== 'random') return run(orderBy('net', sort === 'top' ? 'desc' : 'asc'), limit(n));
+  if (sort === 'latest') return paged(orderBy('updatedAt', 'desc'));
+  if (sort === 'oldest') return paged(orderBy('departedAt', 'asc'));
+  if (sort !== 'random') return paged(orderBy('net', sort === 'top' ? 'desc' : 'asc'));
   const r = Math.random();
   const cars = await run(where('rnd', '>=', r), orderBy('rnd'), limit(n));
   if (cars.length < n) cars.push(...(await run(where('rnd', '<', r), orderBy('rnd'), limit(n - cars.length))));

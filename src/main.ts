@@ -3163,25 +3163,27 @@ const pieceKey = (id: string) => `piece/${id}`;
 
 // Firestore caps a document at 1 MiB; leave room for the other fields.
 const UPLOAD_BUDGET = 900_000;
+// Every reel downloads each car's artwork inline, so keep it small: reels never show a car
+// wider than this, and your own full-res copy stays on your device.
+const UPLOAD_MAX_W = 1600;
 
-// Dense pieces can encode to several MB at full size. Rather than refuse, shrink until it
-// fits: the reels only ever show cars at ~35%, so a scaled copy looks the same there.
 async function encodeForUpload(body: HTMLCanvasElement): Promise<string> {
-  let src = body;
-  let scale = 1;
+  let scale = Math.min(1, UPLOAD_MAX_W / body.width);
   for (let attempt = 0; attempt < 6; attempt++) {
-    const blob = await new Promise<Blob | null>((r) => src.toBlob(r, 'image/webp', 0.85));
+    let src = body;
+    if (scale < 1) {
+      src = document.createElement('canvas');
+      src.width = Math.max(1, Math.round(body.width * scale));
+      src.height = Math.max(1, Math.round(body.height * scale));
+      const ctx = src.getContext('2d')!;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(body, 0, 0, src.width, src.height);
+    }
+    const blob = await new Promise<Blob | null>((r) => src.toBlob(r, 'image/webp', 0.8));
     if (!blob) throw new Error('Paint encode failed');
     const url = await blobToDataUrl(blob);
     if (url.length <= UPLOAD_BUDGET) return url;
     scale *= Math.max(0.3, Math.sqrt(UPLOAD_BUDGET / url.length) * 0.92);
-    const c = document.createElement('canvas');
-    c.width = Math.max(1, Math.round(body.width * scale));
-    c.height = Math.max(1, Math.round(body.height * scale));
-    const ctx = c.getContext('2d')!;
-    ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(body, 0, 0, c.width, c.height);
-    src = c;
   }
   throw new Error('Piece too large to upload even when scaled');
 }
@@ -4622,7 +4624,20 @@ for (const id of ['top', 'sub'] as const) {
   renderMyWorkBtn(id);
 }
 
-async function buildMainline(): Promise<RollEntry[]> {
+// A failed feed retries quietly instead of flashing the sample cars at a real visitor.
+async function withRetry<T>(load: () => Promise<T>, tries = 4): Promise<T> {
+  for (let i = 1; ; i++) {
+    try {
+      return await load();
+    } catch (err) {
+      console.error('Registry feed failed', err);
+      if (i >= tries) throw err;
+      await new Promise((r) => setTimeout(r, 1500 * i));
+    }
+  }
+}
+
+async function buildMainline(onFirst?: (head: RollEntry[]) => void): Promise<RollEntry[]> {
   if (myWork.top) {
     const uid = currentUser?.uid;
     if (!uid) return [];
@@ -4633,11 +4648,14 @@ async function buildMainline(): Promise<RollEntry[]> {
       return [];
     }
   }
+  const toEntries = (cars: RegistryCar[]) => cars.map(regEntry).filter((e): e is RollEntry => !!e);
   try {
-    const live = (await listFeed('freight', topSort, MAINLINE_SIZE)).map(regEntry).filter((e): e is RollEntry => !!e);
+    const live = toEntries(
+      await withRetry(() => listFeed('freight', topSort, MAINLINE_SIZE, onFirst && ((head) => onFirst(toEntries(head))))),
+    );
     if (live.length) return live;
-  } catch (err) {
-    console.error('Registry feed failed', err);
+  } catch {
+    // Fall through to the samples only after every retry has failed.
   }
   return presetEntries().map((e) => ({ ...e, props: entryProps(e, readMeta()) }));
 }
@@ -4666,13 +4684,52 @@ function startReel(entries: RollEntry[], title: string, yardLine: boolean): void
   enterRollBy(true, entries);
 }
 
+// Adds the rest of the feed behind the cars already rolling, without moving what's on screen.
+function extendReel(tail: RollEntry[]): void {
+  if (!roll?.showcase || !roll.entries || !tail.length) return;
+  // Stored reversed (see startReel), so later feed cars go in front of index 0.
+  const add = [...tail].reverse();
+  const k = add.length;
+  const token = ++rollToken;
+  roll.token = token;
+  roll.entries = [...add, ...roll.entries];
+  roll.images = [...new Array<CanvasImageSource | null>(k).fill(null), ...roll.images];
+  roll.x += k * CAR_WIDTH;
+  const sel = reelSel.top;
+  if (sel.pinned !== null) sel.pinned += k;
+  if (sel.active >= 0) sel.active += k;
+  if (cardSrc === 'top' && cardCar >= 0) cardCar += k;
+  roll.entries.forEach((e, i) => {
+    if (!roll!.images[i]) void loadEntryImage(e, i, token);
+  });
+}
+
+let mainlineToken = 0;
+
+function setReelLoading(id: ReelId, on: boolean): void {
+  document.getElementById(id === 'top' ? 'sc-loading' : 'sub-loading')!.hidden = !on;
+}
+
 async function startMainline(): Promise<void> {
   const title = myWork.top ? 'My Trains' : 'Train';
-  reelDescription.textContent = 'Pulling the line-up…';
+  const token = ++mainlineToken;
+  reelDescription.textContent = '';
+  setReelLoading('top', true);
   startReel([], title, false);
-  const entries = await buildMainline();
-  if (roll?.showcase) {
-    reelDescription.textContent = entries.length || !myWork.top ? '' : "You haven't painted any trains yet.";
+  let head: RollEntry[] = [];
+  const entries = await buildMainline((first) => {
+    if (token !== mainlineToken || !roll?.showcase || !first.length) return;
+    head = first;
+    setReelLoading('top', false);
+    startReel(first, title, false);
+  });
+  if (token !== mainlineToken || !roll?.showcase) return;
+  setReelLoading('top', false);
+  reelDescription.textContent = entries.length || !myWork.top ? '' : "You haven't painted any trains yet.";
+  const headIds = new Set(head.map((e) => e.reg?.id));
+  if (head.length && entries.length >= head.length && entries.slice(0, head.length).every((e) => headIds.has(e.reg?.id))) {
+    extendReel(entries.slice(head.length));
+  } else {
     startReel(entries, title, false);
   }
 }
@@ -5220,12 +5277,23 @@ const subBackBtn = document.getElementById('sub-back') as HTMLButtonElement;
 let subGeom = { W: 1, scale: 1, trainW: 1 };
 
 // Public subway archives, with community presets standing in until real cars land.
-async function buildSubwayLine(): Promise<{ entries: RollEntry[]; images: (CanvasImageSource | null)[] }> {
+async function buildSubwayLine(
+  onFirst?: (head: { entries: RollEntry[]; images: (CanvasImageSource | null)[] }) => void,
+): Promise<{ entries: RollEntry[]; images: (CanvasImageSource | null)[] }> {
+  const toEntries = (cars: RegistryCar[]) => cars.map(regEntry).filter((e): e is RollEntry => !!e);
   try {
-    const live = (await listFeed('subway', subSort, SUBWAY_LINE_SIZE)).map(regEntry).filter((e): e is RollEntry => !!e);
+    let firstShown: Promise<void> = Promise.resolve();
+    const cars = await withRetry(() =>
+      listFeed('subway', subSort, SUBWAY_LINE_SIZE, (head) => {
+        const entries = toEntries(head);
+        firstShown = Promise.all(entries.map(entryImage)).then((images) => onFirst?.({ entries, images }));
+      }),
+    );
+    await firstShown;
+    const live = toEntries(cars);
     if (live.length) return { entries: live, images: await Promise.all(live.map(entryImage)) };
-  } catch (err) {
-    console.error('Registry feed failed', err);
+  } catch {
+    // Fall through to the samples only after every retry has failed.
   }
   const fallback = presetEntries().map((e) => ({ ...e, sub: true, props: entryProps(e, readMeta()) }));
   return { entries: fallback, images: await Promise.all(fallback.map(entryImage)) };
@@ -5254,13 +5322,33 @@ function loadSubwayLine(yard: YardId | null): void {
   subwayReel.images = [];
   subwayReel.sx = Number.NaN;
   subwayTitle.textContent = myWork.sub ? 'My Subways' : 'Subway';
-  void (myWork.sub ? buildMySubwayLine() : buildSubwayLine()).then(({ entries, images }) => {
-    if (token !== subwayReel.token) return;
+  setReelLoading('sub', true);
+  let headCount = 0;
+  const showHead = ({ entries, images }: { entries: RollEntry[]; images: (CanvasImageSource | null)[] }) => {
+    if (token !== subwayReel.token || !entries.length) return;
+    setReelLoading('sub', false);
+    headCount = entries.length;
     subwayReel.entries = entries;
     subwayReel.images = images;
     subwayReel.sx = Number.NaN;
     resetReelSel('sub');
+  };
+  void (myWork.sub ? buildMySubwayLine() : buildSubwayLine(showHead)).then(({ entries, images }) => {
+    if (token !== subwayReel.token) return;
+    setReelLoading('sub', false);
     subDescription.textContent = entries.length || !myWork.sub ? '' : "You haven't painted any subway cars yet.";
+    const same =
+      headCount > 0 && entries.length >= headCount && entries.slice(0, headCount).every((e, i) => e.reg?.id === subwayReel.entries[i]?.reg?.id);
+    if (same) {
+      // Subway rolls right-to-left with index 0 leading, so the rest simply couples on behind.
+      subwayReel.entries = entries;
+      subwayReel.images = [...subwayReel.images.slice(0, headCount), ...images.slice(headCount)];
+      return;
+    }
+    subwayReel.entries = entries;
+    subwayReel.images = images;
+    subwayReel.sx = Number.NaN;
+    resetReelSel('sub');
   });
 }
 function renderSubControls(): void {
