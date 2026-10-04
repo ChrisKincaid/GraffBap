@@ -2362,7 +2362,7 @@ function isTyping(t: EventTarget | null): boolean {
 }
 
 window.addEventListener('keydown', (e) => {
-  if (authDialog.open || helpDialog.open) return;
+  if (authDialog.open || helpDialog.open || welcomeDialog.open) return;
   if (!benchEl.hidden) {
     if (e.key === 'Escape') {
       e.preventDefault();
@@ -4811,6 +4811,26 @@ document.getElementById('tos-close')!.addEventListener('click', () => tosDialog.
 tosDialog.addEventListener('click', (e) => {
   if (e.target === tosDialog) tosDialog.close();
 });
+
+const WELCOME_KEY = 'graffbap_welcome_v1';
+const welcomeDialog = document.getElementById('welcome-dialog') as HTMLDialogElement;
+document.getElementById('welcome-close')!.addEventListener('click', () => welcomeDialog.close());
+welcomeDialog.addEventListener('close', () => {
+  try {
+    localStorage.setItem(WELCOME_KEY, '1');
+  } catch {
+    // The welcome still works when storage is unavailable; it just won't be remembered.
+  }
+});
+function showWelcomeIfNeeded(): void {
+  try {
+    if (localStorage.getItem(WELCOME_KEY) === '1') return;
+  } catch {
+    // Show it when storage is unavailable rather than silently skipping first-run guidance.
+  }
+  welcomeDialog.showModal();
+}
+
 const landingAccountBtn = document.getElementById('landing-account') as HTMLButtonElement;
 const writerIdEl = document.getElementById('writer-id')!;
 const writerIdTitle = document.getElementById('wid-title')!;
@@ -6131,3 +6151,4 @@ updateCursor();
 requestAnimationFrame(render);
 applyRoute();
 document.body.classList.add('ready');
+showWelcomeIfNeeded();
