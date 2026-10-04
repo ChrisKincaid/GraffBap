@@ -14,12 +14,13 @@ import {
   where,
   writeBatch,
   type QueryConstraint,
+  type QueryDocumentSnapshot,
 } from 'firebase/firestore';
 import { db } from './firebase';
 
 // Global car registry: every departed piece, its lifecycle status and community score.
 export type CarStatus = 'departed' | 'hall_of_fame' | 'museum' | 'buffed' | 'banned' | 'quarantined';
-export type FeedSort = 'top' | 'grave' | 'latest' | 'oldest' | 'random' | 'painting';
+export type FeedSort = 'top' | 'grave' | 'latest' | 'oldest' | 'random';
 
 export interface RegistryCar {
   id: string;
@@ -44,11 +45,6 @@ export interface RegistryCar {
   basedOn?: string;
   basedOnWriter?: string;
 }
-
-// A car touched within this window is still being worked on, so it can't be rated yet.
-export const PAINTING_WINDOW_MS = 2 * 60_000;
-export const isBeingPainted = (c: Pick<RegistryCar, 'updatedAt'>, now = Date.now()) =>
-  !!c.updatedAt && now - c.updatedAt < PAINTING_WINDOW_MS;
 
 export const HOF_BASE = 5;
 export const HOF_STEP = 10;
@@ -223,43 +219,58 @@ export async function reportRegistryCar(id: string, uid: string): Promise<'alrea
   });
 }
 
-// Cars carry their artwork inline, so a full line is megabytes: onFirst gets a small first
-// page right away so the reel can start rolling while the rest downloads.
-const FIRST_PAGE = 3;
+export interface FeedPager {
+  readonly done: boolean;
+  next(n: number): Promise<RegistryCar[]>;
+}
 
-export async function listFeed(
-  division: 'freight' | 'subway',
-  sort: FeedSort,
-  n: number,
-  onFirst?: (cars: RegistryCar[]) => void,
-): Promise<RegistryCar[]> {
+// Walks a line in pages so a reel can keep coupling on cars as it rolls instead of
+// downloading every car's inline artwork up front.
+export function feedPager(division: 'freight' | 'subway', sort: FeedSort): FeedPager {
   const base: QueryConstraint[] = [where('division', '==', division), where('status', 'in', ROLLING)];
-  const run = async (...extra: QueryConstraint[]) =>
-    (await getDocs(query(collection(db, CARS), ...base, ...extra))).docs.map((d) => toCar(d.id, d.data()));
-  const paged = async (...order: QueryConstraint[]) => {
-    if (!onFirst || n <= FIRST_PAGE) return run(...order, limit(n));
-    const first = await getDocs(query(collection(db, CARS), ...base, ...order, limit(FIRST_PAGE)));
-    const head = first.docs.map((d) => toCar(d.id, d.data()));
-    onFirst(head);
-    const last = first.docs[first.docs.length - 1];
-    if (!last || first.size < FIRST_PAGE) return head;
-    return [...head, ...(await run(...order, startAfter(last), limit(n - FIRST_PAGE)))];
-  };
-  if (sort === 'painting') {
-    return paged(where('updatedAt', '>', Date.now() - PAINTING_WINDOW_MS), orderBy('updatedAt', 'desc'));
-  }
-  // Latest = most recently posted or re-posted, so edited pieces come back to the front.
-  if (sort === 'latest') return paged(orderBy('updatedAt', 'desc'));
-  if (sort === 'oldest') return paged(orderBy('departedAt', 'asc'));
-  if (sort !== 'random') return paged(orderBy('net', sort === 'top' ? 'desc' : 'asc'));
   const r = Math.random();
-  const cars = await run(where('rnd', '>=', r), orderBy('rnd'), limit(n));
-  if (cars.length < n) cars.push(...(await run(where('rnd', '<', r), orderBy('rnd'), limit(n - cars.length))));
-  for (let i = cars.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [cars[i], cars[j]] = [cars[j]!, cars[i]!];
-  }
-  return cars;
+  // Random walks rnd >= r, then wraps round to rnd < r.
+  let wrapped = false;
+  let last: QueryDocumentSnapshot | undefined;
+  let done = false;
+  const order = (): QueryConstraint[] => {
+    // Latest = most recently posted or re-posted, so edited pieces come back to the front.
+    if (sort === 'latest') return [orderBy('updatedAt', 'desc')];
+    if (sort === 'oldest') return [orderBy('departedAt', 'asc')];
+    if (sort === 'random') return [where('rnd', wrapped ? '<' : '>=', r), orderBy('rnd')];
+    return [orderBy('net', sort === 'top' ? 'desc' : 'asc')];
+  };
+  return {
+    get done() {
+      return done;
+    },
+    async next(n: number) {
+      const out: RegistryCar[] = [];
+      while (!done && out.length < n) {
+        const want = n - out.length;
+        const snap = await getDocs(
+          query(collection(db, CARS), ...base, ...order(), ...(last ? [startAfter(last)] : []), limit(want)),
+        );
+        out.push(...snap.docs.map((d) => toCar(d.id, d.data())));
+        last = snap.docs[snap.docs.length - 1] ?? last;
+        if (snap.size < want) {
+          if (sort === 'random' && !wrapped) {
+            wrapped = true;
+            last = undefined;
+          } else {
+            done = true;
+          }
+        }
+      }
+      if (sort === 'random') {
+        for (let i = out.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [out[i], out[j]] = [out[j]!, out[i]!];
+        }
+      }
+      return out;
+    },
+  };
 }
 
 // Cars this profile painted, newest touch first.
@@ -275,18 +286,6 @@ export async function listMine(uid: string, division: 'freight' | 'subway', n: n
     ),
   );
   return snap.docs.map((d) => toCar(d.id, d.data()));
-}
-
-export async function countPainting(division: 'freight' | 'subway'): Promise<number> {
-  const snap = await getCountFromServer(
-    query(
-      collection(db, CARS),
-      where('division', '==', division),
-      where('status', 'in', ROLLING),
-      where('updatedAt', '>', Date.now() - PAINTING_WINDOW_MS),
-    ),
-  );
-  return snap.data().count;
 }
 
 export async function listMuseum(n: number): Promise<RegistryCar[]> {

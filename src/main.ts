@@ -13,15 +13,15 @@ import {
 } from './audio';
 import { drawBackdrop, GROUND_Y, seededRandom } from './backdrop';
 import {
-  countPainting,
+  feedPager,
   getRegistryCar,
-  listFeed,
   listMine,
   registerDeparture,
   reportRegistryCar,
   retirePiece,
   updatePieceImage,
   voteRegistryCar,
+  type FeedPager,
   type FeedSort,
   type RegistryCar,
 } from './services/registry';
@@ -3688,6 +3688,7 @@ function renderRollBy(now: number): void {
   const dt = Math.min(0.1, (now - r.lastT) / 1000);
   r.lastT = now;
   if (!r.paused) r.x += (r.showcase ? -1 : 1) * ROLL_SPEED * ROLL_SPEEDS[r.speedIdx]!.rate * dt;
+  if (r.showcase) maybeGrowTop();
   // Loop: once the last car clears, the train re-enters from the right.
   if (r.x > rollCount(r) * CAR_WIDTH) r.x = -L.W / L.scale;
   else if (r.x < -L.W / L.scale) r.x = rollCount(r) * CAR_WIDTH;
@@ -4085,27 +4086,6 @@ for (const id of ['top', 'sub'] as const) {
     }
   });
 }
-
-// The "Currently painting" option only opens up while someone actually has a can on a car.
-async function refreshPaintingOption(): Promise<void> {
-  for (const [sel, division] of [
-    ['sc-sort', 'freight'],
-    ['sub-sort', 'subway'],
-  ] as const) {
-    const option = document.querySelector<HTMLOptionElement>(`#${sel} option[value="painting"]`);
-    if (!option) continue;
-    let count = 0;
-    try {
-      count = await countPainting(division);
-    } catch (err) {
-      console.error('Painting count failed', err);
-    }
-    option.disabled = count === 0;
-    option.textContent = count ? `Currently painting (${count})` : 'Currently painting';
-  }
-}
-void refreshPaintingOption();
-setInterval(() => void refreshPaintingOption(), 60_000);
 
 let topSort: SortMode = 'latest';
 let subSort: SortMode = 'latest';
@@ -4637,27 +4617,33 @@ async function withRetry<T>(load: () => Promise<T>, tries = 4): Promise<T> {
   }
 }
 
-async function buildMainline(onFirst?: (head: RollEntry[]) => void): Promise<RollEntry[]> {
+// Lines load a few cars to get rolling, then couple on a batch at a time before the tail
+// comes into view, so a long train never costs a big download up front.
+const LINE_FIRST = 3;
+const LINE_BATCH = 15;
+const LINE_MAX = 300;
+const GROW_AHEAD = 8 * CAR_WIDTH;
+const regEntries = (cars: RegistryCar[]) => cars.map(regEntry).filter((e): e is RollEntry => !!e);
+
+async function buildMainline(): Promise<{ entries: RollEntry[]; pager: FeedPager | null }> {
   if (myWork.top) {
     const uid = currentUser?.uid;
-    if (!uid) return [];
+    if (!uid) return { entries: [], pager: null };
     try {
-      return (await listMine(uid, 'freight', MAINLINE_SIZE)).map(regEntry).filter((e): e is RollEntry => !!e);
+      return { entries: regEntries(await listMine(uid, 'freight', MAINLINE_SIZE)), pager: null };
     } catch (err) {
       console.error('My pieces feed failed', err);
-      return [];
+      return { entries: [], pager: null };
     }
   }
-  const toEntries = (cars: RegistryCar[]) => cars.map(regEntry).filter((e): e is RollEntry => !!e);
+  const pager = feedPager('freight', topSort);
   try {
-    const live = toEntries(
-      await withRetry(() => listFeed('freight', topSort, MAINLINE_SIZE, onFirst && ((head) => onFirst(toEntries(head))))),
-    );
-    if (live.length) return live;
+    const live = regEntries(await withRetry(() => pager.next(LINE_FIRST)));
+    if (live.length) return { entries: live, pager };
   } catch {
     // Fall through to the samples only after every retry has failed.
   }
-  return presetEntries().map((e) => ({ ...e, props: entryProps(e, readMeta()) }));
+  return { entries: presetEntries().map((e) => ({ ...e, props: entryProps(e, readMeta()) })), pager: null };
 }
 function startReel(entries: RollEntry[], title: string, yardLine: boolean): void {
   if (roll && !roll.showcase) return;
@@ -4684,12 +4670,14 @@ function startReel(entries: RollEntry[], title: string, yardLine: boolean): void
   enterRollBy(true, entries);
 }
 
-// Adds the rest of the feed behind the cars already rolling, without moving what's on screen.
+// Adds the next batch behind the cars already rolling, without moving what's on screen.
 function extendReel(tail: RollEntry[]): void {
-  if (!roll?.showcase || !roll.entries || !tail.length) return;
+  if (!roll?.showcase || !roll.entries) return;
+  const have = new Set(roll.entries.map((e) => e.reg?.id));
   // Stored reversed (see startReel), so later feed cars go in front of index 0.
-  const add = [...tail].reverse();
+  const add = tail.filter((e) => !have.has(e.reg?.id)).reverse();
   const k = add.length;
+  if (!k) return;
   const token = ++rollToken;
   roll.token = token;
   roll.entries = [...add, ...roll.entries];
@@ -4705,6 +4693,26 @@ function extendReel(tail: RollEntry[]): void {
 }
 
 let mainlineToken = 0;
+let topPager: FeedPager | null = null;
+let topGrowing = false;
+
+// Called every frame: once the tail is within a few cars of the screen, fetch the next batch.
+function maybeGrowTop(): void {
+  const r = roll;
+  const pager = topPager;
+  if (!r?.showcase || !r.entries || !pager || pager.done || topGrowing) return;
+  if (r.entries.length >= LINE_MAX || r.x > GROW_AHEAD) return;
+  topGrowing = true;
+  void pager
+    .next(Math.min(LINE_BATCH, LINE_MAX - r.entries.length))
+    .then((cars) => {
+      if (pager === topPager) extendReel(regEntries(cars));
+    })
+    .catch((err) => console.error('Line batch failed', err))
+    .finally(() => {
+      if (pager === topPager) topGrowing = false;
+    });
+}
 
 function setReelLoading(id: ReelId, on: boolean): void {
   document.getElementById(id === 'top' ? 'sc-loading' : 'sub-loading')!.hidden = !on;
@@ -4713,25 +4721,17 @@ function setReelLoading(id: ReelId, on: boolean): void {
 async function startMainline(): Promise<void> {
   const title = myWork.top ? 'My Trains' : 'Train';
   const token = ++mainlineToken;
+  topPager = null;
+  topGrowing = false;
   reelDescription.textContent = '';
   setReelLoading('top', true);
   startReel([], title, false);
-  let head: RollEntry[] = [];
-  const entries = await buildMainline((first) => {
-    if (token !== mainlineToken || !roll?.showcase || !first.length) return;
-    head = first;
-    setReelLoading('top', false);
-    startReel(first, title, false);
-  });
+  const { entries, pager } = await buildMainline();
   if (token !== mainlineToken || !roll?.showcase) return;
   setReelLoading('top', false);
   reelDescription.textContent = entries.length || !myWork.top ? '' : "You haven't painted any trains yet.";
-  const headIds = new Set(head.map((e) => e.reg?.id));
-  if (head.length && entries.length >= head.length && entries.slice(0, head.length).every((e) => headIds.has(e.reg?.id))) {
-    extendReel(entries.slice(head.length));
-  } else {
-    startReel(entries, title, false);
-  }
+  startReel(entries, title, false);
+  topPager = pager;
 }
 
 reelBackBtn.addEventListener('click', () => void startMainline());
@@ -4757,6 +4757,11 @@ tosDialog.addEventListener('click', (e) => {
 });
 const landingAccountBtn = document.getElementById('landing-account') as HTMLButtonElement;
 const writerIdEl = document.getElementById('writer-id')!;
+const writerIdTitle = document.getElementById('wid-title')!;
+const writerIdMessage = document.getElementById('wid-message')!;
+const writerIdContinue = document.getElementById('wid-continue')!;
+const writerIdAnonymous = document.getElementById('wid-anonymous') as HTMLButtonElement;
+const writerIdDismiss = document.getElementById('wid-dismiss')!;
 
 // An anonymous session is an identity, not an account: it reads as signed-out everywhere.
 const signedIn = () => !!currentUser && !currentUser.isAnonymous;
@@ -4773,12 +4778,31 @@ function renderAccount(): void {
 }
 
 function openWriterId(): void {
+  writerIdEl.dataset.mode = 'account';
+  writerIdTitle.textContent = 'BOXBAP.COM ACCOUNT';
+  writerIdMessage.textContent = 'Sign in with a BoxBap.com account to use this feature.';
+  writerIdContinue.textContent = '[ Sign in with BoxBap.com ]';
+  writerIdAnonymous.hidden = true;
+  writerIdDismiss.textContent = 'Not now';
   writerIdEl.hidden = false;
   document.getElementById('wid-continue')!.focus();
 }
 
+function openPostChoice(): void {
+  writerIdEl.dataset.mode = 'post';
+  writerIdTitle.textContent = 'POST THIS PIECE';
+  writerIdMessage.textContent = 'Sign in with BoxBap.com to save your work or post anonymously.';
+  writerIdContinue.textContent = '[ Sign in to save ]';
+  writerIdAnonymous.hidden = false;
+  writerIdDismiss.textContent = 'Not now';
+  writerIdEl.hidden = false;
+  writerIdContinue.focus();
+}
+
 function closeWriterId(): void {
   writerIdEl.hidden = true;
+  writerIdAnonymous.hidden = true;
+  writerIdEl.dataset.mode = 'account';
 }
 
 function startBoxBapAuth(): void {
@@ -4806,8 +4830,14 @@ function syncNow(): void {
   if (!swapPending) saveNow();
 }
 
-document.getElementById('wid-continue')!.addEventListener('click', startBoxBapAuth);
-document.getElementById('wid-dismiss')!.addEventListener('click', () => {
+writerIdContinue.addEventListener('click', startBoxBapAuth);
+writerIdAnonymous.addEventListener('click', () => {
+  const action = pendingAuthAction;
+  pendingAuthAction = null;
+  closeWriterId();
+  action?.();
+});
+writerIdDismiss.addEventListener('click', () => {
   pendingAuthAction = null;
   closeWriterId();
 });
@@ -5277,38 +5307,59 @@ const subBackBtn = document.getElementById('sub-back') as HTMLButtonElement;
 let subGeom = { W: 1, scale: 1, trainW: 1 };
 
 // Public subway archives, with community presets standing in until real cars land.
-async function buildSubwayLine(
-  onFirst?: (head: { entries: RollEntry[]; images: (CanvasImageSource | null)[] }) => void,
-): Promise<{ entries: RollEntry[]; images: (CanvasImageSource | null)[] }> {
-  const toEntries = (cars: RegistryCar[]) => cars.map(regEntry).filter((e): e is RollEntry => !!e);
+async function buildSubwayLine(): Promise<{ entries: RollEntry[]; pager: FeedPager | null }> {
+  const pager = feedPager('subway', subSort);
   try {
-    let firstShown: Promise<void> = Promise.resolve();
-    const cars = await withRetry(() =>
-      listFeed('subway', subSort, SUBWAY_LINE_SIZE, (head) => {
-        const entries = toEntries(head);
-        firstShown = Promise.all(entries.map(entryImage)).then((images) => onFirst?.({ entries, images }));
-      }),
-    );
-    await firstShown;
-    const live = toEntries(cars);
-    if (live.length) return { entries: live, images: await Promise.all(live.map(entryImage)) };
+    const live = regEntries(await withRetry(() => pager.next(LINE_FIRST)));
+    if (live.length) return { entries: live, pager };
   } catch {
     // Fall through to the samples only after every retry has failed.
   }
-  const fallback = presetEntries().map((e) => ({ ...e, sub: true, props: entryProps(e, readMeta()) }));
-  return { entries: fallback, images: await Promise.all(fallback.map(entryImage)) };
+  return { entries: presetEntries().map((e) => ({ ...e, sub: true, props: entryProps(e, readMeta()) })), pager: null };
 }
 
-async function buildMySubwayLine(): Promise<{ entries: RollEntry[]; images: (CanvasImageSource | null)[] }> {
+async function buildMySubwayLine(): Promise<{ entries: RollEntry[]; pager: FeedPager | null }> {
   const uid = currentUser?.uid;
-  if (!uid) return { entries: [], images: [] };
+  if (!uid) return { entries: [], pager: null };
   try {
-    const mine = (await listMine(uid, 'subway', SUBWAY_LINE_SIZE)).map(regEntry).filter((e): e is RollEntry => !!e);
-    return { entries: mine, images: await Promise.all(mine.map(entryImage)) };
+    return { entries: regEntries(await listMine(uid, 'subway', SUBWAY_LINE_SIZE)), pager: null };
   } catch (err) {
     console.error('My pieces feed failed', err);
-    return { entries: [], images: [] };
+    return { entries: [], pager: null };
   }
+}
+
+let subPager: FeedPager | null = null;
+let subGrowing = false;
+
+function loadSubImage(e: RollEntry, i: number, token: number): void {
+  void entryImage(e).then((img) => {
+    if (img && token === subwayReel.token) subwayReel.images[i] = img;
+  });
+}
+
+// Subway rolls right-to-left with index 0 leading, so each batch couples on behind the tail.
+function maybeGrowSub(W: number, scale: number): void {
+  const pager = subPager;
+  if (!pager || pager.done || subGrowing || subwayReel.entries.length >= LINE_MAX) return;
+  if (subwayReel.sx + subwayReel.entries.length * CAR_WIDTH * scale > W + GROW_AHEAD * scale) return;
+  subGrowing = true;
+  const token = subwayReel.token;
+  void pager
+    .next(Math.min(LINE_BATCH, LINE_MAX - subwayReel.entries.length))
+    .then((cars) => {
+      if (pager !== subPager || token !== subwayReel.token) return;
+      const have = new Set(subwayReel.entries.map((e) => e.reg?.id));
+      const add = regEntries(cars).filter((e) => !have.has(e.reg?.id));
+      const start = subwayReel.entries.length;
+      subwayReel.entries.push(...add);
+      subwayReel.images.push(...add.map(() => null));
+      add.forEach((e, j) => loadSubImage(e, start + j, token));
+    })
+    .catch((err) => console.error('Line batch failed', err))
+    .finally(() => {
+      if (pager === subPager) subGrowing = false;
+    });
 }
 
 function loadSubwayLine(yard: YardId | null): void {
@@ -5321,34 +5372,21 @@ function loadSubwayLine(yard: YardId | null): void {
   subwayReel.entries = [];
   subwayReel.images = [];
   subwayReel.sx = Number.NaN;
+  subPager = null;
+  subGrowing = false;
   subwayTitle.textContent = myWork.sub ? 'My Subways' : 'Subway';
   setReelLoading('sub', true);
-  let headCount = 0;
-  const showHead = ({ entries, images }: { entries: RollEntry[]; images: (CanvasImageSource | null)[] }) => {
-    if (token !== subwayReel.token || !entries.length) return;
-    setReelLoading('sub', false);
-    headCount = entries.length;
-    subwayReel.entries = entries;
-    subwayReel.images = images;
-    subwayReel.sx = Number.NaN;
-    resetReelSel('sub');
-  };
-  void (myWork.sub ? buildMySubwayLine() : buildSubwayLine(showHead)).then(({ entries, images }) => {
+  void (myWork.sub ? buildMySubwayLine() : buildSubwayLine()).then(async ({ entries, pager }) => {
+    // Hold the first cars back until their art is decoded so they don't roll in blank.
+    const images = await Promise.all(entries.map(entryImage));
     if (token !== subwayReel.token) return;
     setReelLoading('sub', false);
     subDescription.textContent = entries.length || !myWork.sub ? '' : "You haven't painted any subway cars yet.";
-    const same =
-      headCount > 0 && entries.length >= headCount && entries.slice(0, headCount).every((e, i) => e.reg?.id === subwayReel.entries[i]?.reg?.id);
-    if (same) {
-      // Subway rolls right-to-left with index 0 leading, so the rest simply couples on behind.
-      subwayReel.entries = entries;
-      subwayReel.images = [...subwayReel.images.slice(0, headCount), ...images.slice(headCount)];
-      return;
-    }
     subwayReel.entries = entries;
     subwayReel.images = images;
     subwayReel.sx = Number.NaN;
     resetReelSel('sub');
+    subPager = pager;
   });
 }
 function renderSubControls(): void {
@@ -5441,6 +5479,7 @@ function renderSubwayReel(now: number): void {
   }
   if (subwayReel.sx + trainW < 0) subwayReel.sx = W;
   else if (subwayReel.sx > W) subwayReel.sx = -trainW;
+  maybeGrowSub(W, scale);
   subGeom = { W, scale, trainW };
 
   const ctx = subwayCtx;
@@ -5809,9 +5848,6 @@ authForm.addEventListener('submit', (e) => {
 });
 setAuthMode('signin');
 
-// Set while the sign-in dialog was opened by Save, so dismissing it still keeps the piece.
-let saveOnDismiss = false;
-
 function savePiece(): void {
   if (practiceMode || !car().hasPaint) {
     showToast('Nothing to save yet');
@@ -5823,14 +5859,12 @@ function savePiece(): void {
 document.getElementById('save-car')!.addEventListener('click', (e) => {
   (e.currentTarget as HTMLElement).blur();
   if (signedIn()) return savePiece();
-  saveOnDismiss = true;
-  requireAuth(savePiece, false);
+  pendingAuthAction = savePiece;
+  openPostChoice();
 });
 
 authDialog.addEventListener('close', () => {
   if (!signedIn()) pendingAuthAction = null;
-  if (saveOnDismiss && !signedIn()) savePiece();
-  saveOnDismiss = false;
   authPassword.value = '';
   authError.textContent = '';
 });

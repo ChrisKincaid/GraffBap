@@ -217,7 +217,7 @@
           <span id="reel-description" class="reel-description"></span>
           <button id="sc-play" class="reel-control-play" type="button" aria-label="Pause" title="Pause">&#x23F8;</button>
           <button id="sc-speed" class="reel-control-speed" type="button" title="Speed 1x">1x</button>
-          <span class="reel-sort-label">Sort by</span><select id="sc-sort" class="reel-sort" aria-label="Sort Freight cars"><option value="latest" selected>Latest</option><option value="top">Best rated</option><option value="grave">Worst rated</option><option value="oldest">Oldest</option><option value="random">Random</option><option value="painting">Currently painting</option></select>
+          <span class="reel-sort-label">Sort by</span><select id="sc-sort" class="reel-sort" aria-label="Sort Freight cars"><option value="latest" selected>Latest</option><option value="top">Best rated</option><option value="grave">Worst rated</option><option value="oldest">Oldest</option><option value="random">Random</option></select>
           <button id="sc-mine" class="reel-mine" type="button" aria-pressed="false" title="Show only the cars you painted">Show My Work</button>
           <button id="reel-back" class="reel-back" type="button" hidden>Back to Mainline</button>
         </div>
@@ -235,7 +235,7 @@
           <span id="sub-description" class="reel-description"></span>
           <button id="sub-play" class="reel-control-play" type="button" aria-label="Pause" title="Pause">&#x23F8;</button>
           <button id="sub-speed" class="reel-control-speed" type="button" title="Speed 1x">1x</button>
-          <span class="reel-sort-label">Sort by</span><select id="sub-sort" class="reel-sort" aria-label="Sort Subway cars"><option value="latest" selected>Latest</option><option value="top">Best rated</option><option value="grave">Worst rated</option><option value="oldest">Oldest</option><option value="random">Random</option><option value="painting">Currently painting</option></select>
+          <span class="reel-sort-label">Sort by</span><select id="sub-sort" class="reel-sort" aria-label="Sort Subway cars"><option value="latest" selected>Latest</option><option value="top">Best rated</option><option value="grave">Worst rated</option><option value="oldest">Oldest</option><option value="random">Random</option></select>
           <button id="sub-mine" class="reel-mine" type="button" aria-pressed="false" title="Show only the cars you painted">Show My Work</button>
           <button id="sub-back" class="reel-back" type="button" hidden>Back to Subway Line</button>
         </div>
@@ -288,12 +288,13 @@
         <span class="cc-paint-label">Use This Car</span>
       </button>
     </div>
-    <div id="writer-id" hidden role="dialog" aria-labelledby="wid-title">
+    <div id="writer-id" hidden role="dialog" aria-labelledby="wid-title" data-mode="account">
       <div class="wid-kicker"><img src="/Images/BoxBapLogoSm.png" alt="BoxBap.com" /></div>
-      <h2 id="wid-title">BOXBAP.COM PROFILE REQUIRED</h2>
-      <p>One profile for BoxBap.com and GraffBap. Sign in with your existing BoxBap.com profile, or create one to drop props and save your pieces.</p>
-      <button id="wid-continue" class="cta" type="button">[ Continue with BoxBap.com ]</button>
-      <button id="wid-dismiss" type="button">Keep writing as a guest</button>
+      <h2 id="wid-title">BOXBAP.COM ACCOUNT</h2>
+      <p id="wid-message">Sign in with a BoxBap.com account to use this feature.</p>
+      <button id="wid-continue" class="cta" type="button">[ Sign in with BoxBap.com ]</button>
+      <button id="wid-anonymous" class="wid-anonymous" type="button" hidden>Post anonymously</button>
+      <button id="wid-dismiss" type="button">Not now</button>
     </div>
     <div id="bench" hidden role="dialog" aria-modal="true" aria-label="Bench View">
       <div id="bench-view"><canvas id="bench-canvas"></canvas></div>
@@ -369,7 +370,7 @@
           <img src="/Images/BoxBapLogoSm.png" alt="" />
           <h2 id="auth-title">BoxBap.com Profile</h2>
         </div>
-        <p class="auth-intro">One profile for BoxBap.com and GraffBap. Sign in with your existing BoxBap.com profile, or create one to drop props and save your pieces.</p>
+        <p class="auth-intro">Sign in with your BoxBap.com account.</p>
         <fieldset id="auth-fields">
           <div class="auth-social" data-mode="signin">
             <button id="auth-google" type="button">Continue with Google</button>

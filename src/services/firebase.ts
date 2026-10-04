@@ -75,9 +75,20 @@ export const db = (() => {
   }
 })();
 
+let anonymousSignIn: Promise<User> | null = null;
+
 // Everyone gets a real uid on arrival, so anonymous work still has an owner.
-export function ensureAnonymous() {
-  return auth.currentUser ? Promise.resolve(auth.currentUser) : signInAnonymously(auth).then((c) => c.user);
+export async function ensureAnonymous(): Promise<User> {
+  await auth.authStateReady();
+  if (auth.currentUser) return auth.currentUser;
+  if (!anonymousSignIn) {
+    anonymousSignIn = signInAnonymously(auth)
+      .then((credential) => credential.user)
+      .finally(() => {
+        anonymousSignIn = null;
+      });
+  }
+  return anonymousSignIn;
 }
 
 // Linking keeps the same uid, so pieces painted anonymously carry over to the profile.

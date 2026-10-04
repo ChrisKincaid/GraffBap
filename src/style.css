@@ -2151,6 +2151,18 @@ body.showcase .dispatch {
   cursor: pointer;
 }
 
+#writer-id .wid-anonymous {
+  width: 100%;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid #575757;
+  border-radius: 6px;
+  background: #252525;
+  color: #e8e6e1;
+  font: inherit;
+  cursor: pointer;
+}
+
 .acct-dot {
   display: inline-block;
   width: 8px;
@@ -3660,6 +3672,17 @@ body.rollby #toolbar {
   background: none;
   color: #ffd200;
   text-decoration: underline;
+}
+
+#writer-id[data-mode='post'] #wid-dismiss {
+  width: 100%;
+  margin-top: 8px;
+  padding: 10px;
+  border: 1px solid #575757;
+  border-radius: 6px;
+  background: #252525;
+  color: #e8e6e1;
+  text-decoration: none;
 }
 
 #auth-dialog .auth-link:hover:not(:disabled) {
