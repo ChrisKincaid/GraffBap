@@ -3761,16 +3761,13 @@ const ccCount = document.getElementById('cc-count')!;
 const ccPaintBtn = document.getElementById('cc-paint') as HTMLButtonElement;
 const PENCIL_SVG =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20l4-1 11-11-3-3L5 16z"/><path d="M14 7l3 3"/></svg>';
-const SPRAY_SVG =
-  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="7" y="9" width="8" height="13" rx="1.5"/><path d="M9 9V6h4v3M10 6V4h2"/><path d="M18 5h1M20.5 3.2l.8-.8M20.5 7l.8.8"/></svg>';
 
-// Editing your own piece and starting a copy of someone else's must never look the same.
-function renderPaintBtn(mine: boolean): void {
-  ccPaintBtn.classList.toggle('is-mine', mine);
-  ccPaintBtn.querySelector('.cc-paint-icon')!.innerHTML = mine ? PENCIL_SVG : SPRAY_SVG;
-  ccPaintBtn.querySelector('.cc-paint-label')!.textContent = mine ? 'Edit My Car' : 'Use This Car';
-  ccPaintBtn.title = mine ? 'Edit \u2013 keep painting your own piece' : 'Use This Car \u2013 start a new piece from this one';
-  ccPaintBtn.setAttribute('aria-label', mine ? 'Edit my car' : 'Use this car as the base for a new piece');
+function renderPaintBtn(): void {
+  ccPaintBtn.classList.add('is-mine');
+  ccPaintBtn.querySelector('.cc-paint-icon')!.innerHTML = PENCIL_SVG;
+  ccPaintBtn.querySelector('.cc-paint-label')!.textContent = 'Edit My Car';
+  ccPaintBtn.title = 'Edit – keep painting your own piece';
+  ccPaintBtn.setAttribute('aria-label', 'Edit my car');
 }
 const ccPropsCount = document.getElementById('cc-props-count')!;
 let cardCar = -1;
@@ -4179,15 +4176,25 @@ function renderCard(e: RollEntry): void {
   // Report always stays live so a car can't be held unreportable by painting on it.
   ccReportBtn.disabled = !painted || reported;
   ccReportBtn.title = reported ? 'Already reported' : 'Report this car to moderators';
-  ccPaintBtn.hidden = !e.reg;
-  renderPaintBtn(mine);
+  ccPaintBtn.hidden = !mine;
+  if (mine) renderPaintBtn();
   ccPropsCount.textContent = String(entryProps(e, meta));
   renderRating(e, cardRatingUI);
   if (e.reg?.basedOnWriter) ccBy.textContent = `${ccBy.textContent} · over ${e.reg.basedOnWriter}`;
   const n = reelLength(cardSrc);
   // The top line is stored reversed (see startReel), so number it from the leading car.
   ccCount.textContent = n ? `${cardSrc === 'top' ? n - cardCar : cardCar + 1} / ${n}` : '';
-  ccPrevBtn.disabled = ccNextBtn.disabled = n < 2;
+  const canPageNext =
+    (cardSrc === 'top' && !myWork.top && !!topPager && !topPager.done) ||
+    (cardSrc === 'sub' && !myWork.sub && !!subPager && !subPager.done);
+  ccPrevBtn.disabled =
+    n < 2 ||
+    (cardSrc === 'top' && !myWork.top && !!topPager && cardCar === n - 1) ||
+    (cardSrc === 'sub' && !myWork.sub && !!subPager && cardCar === 0);
+  ccNextBtn.disabled =
+    (n < 2 && !canPageNext) ||
+    (cardSrc === 'top' && !myWork.top && !!topPager && cardCar === 0 && topPager.done) ||
+    (cardSrc === 'sub' && !myWork.sub && !!subPager && cardCar === n - 1 && subPager.done);
   drawCardPreview(e);
 }
 
@@ -4250,9 +4257,36 @@ function reelLength(src: ReelId): number {
 
 function stepCard(dir: 1 | -1): void {
   const n = reelLength(cardSrc);
-  if (cardCar < 0 || n < 2) return;
+  if (cardCar < 0 || n < 1) return;
+  if (dir === 1 && cardSrc === 'top' && !myWork.top && cardCar === 0 && topPager && !topPager.done) {
+    ccPrevBtn.disabled = ccNextBtn.disabled = true;
+    void loadNextTopBatch().then((added) => {
+      if (cardSrc !== 'top' || cardCar < 0) return;
+      if (added > 0) inspectRollingCar(cardCar - 1, 'top');
+      else {
+        refreshCard();
+        if (added < 0) showToast('Could not load more trains. Try again.');
+      }
+    });
+    return;
+  }
+  if (dir === 1 && cardSrc === 'sub' && !myWork.sub && cardCar === n - 1 && subPager && !subPager.done) {
+    ccPrevBtn.disabled = ccNextBtn.disabled = true;
+    void loadNextSubBatch().then((added) => {
+      if (cardSrc !== 'sub' || cardCar < 0) return;
+      if (added > 0) inspectRollingCar(n, 'sub');
+      else {
+        refreshCard();
+        if (added < 0) showToast('Could not load more trains. Try again.');
+      }
+    });
+    return;
+  }
   const step = cardSrc === 'top' ? -dir : dir;
-  inspectRollingCar((cardCar + step + n) % n, cardSrc);
+  const next = cardCar + step;
+  const paged = (cardSrc === 'top' && !myWork.top && topPager) || (cardSrc === 'sub' && !myWork.sub && subPager);
+  if (paged && (next < 0 || next >= n)) return;
+  inspectRollingCar((next + n) % n, cardSrc);
 }
 
 ccPrevBtn.addEventListener('click', () => stepCard(-1));
@@ -4284,12 +4318,12 @@ ccReportBtn.addEventListener('click', () => {
 ccPaintBtn.addEventListener('click', () => {
   ccPaintBtn.blur();
   const reg = cardEntryAt(cardCar)?.reg;
-  if (!reg) return;
+  if (!reg || !currentUser || reg.writerUid !== currentUser.uid) return;
   if (reg.status === 'hall_of_fame' && reg.writerUid === currentUser?.uid) {
     showToast('Hall of Fame pieces are locked.');
     return;
   }
-  openPiece(reg, reg.writerUid === currentUser?.uid && !!reg.writerUid);
+  openPiece(reg, true);
 });
 
 // Loads an existing piece into the editor, either to continue it or to paint over a copy.
@@ -4695,6 +4729,36 @@ function extendReel(tail: RollEntry[]): void {
 let mainlineToken = 0;
 let topPager: FeedPager | null = null;
 let topGrowing = false;
+let topGrowth: Promise<number> | null = null;
+
+function loadNextTopBatch(n = LINE_BATCH): Promise<number> {
+  const pager = topPager;
+  const current = roll;
+  if (!pager || pager.done || !current?.showcase) return Promise.resolve(0);
+  if (topGrowth) return topGrowth;
+  const before = rollCount(current);
+  topGrowing = true;
+  let request: Promise<number>;
+  request = pager
+    .next(n)
+    .then((cars) => {
+      if (pager !== topPager || roll !== current) return 0;
+      extendReel(regEntries(cars));
+      return rollCount(current) - before;
+    })
+    .catch((err) => {
+      console.error('Line batch failed', err);
+      return -1;
+    })
+    .finally(() => {
+      if (topGrowth === request) {
+        topGrowth = null;
+        topGrowing = false;
+      }
+    });
+  topGrowth = request;
+  return request;
+}
 
 // Called every frame: once the tail is within a few cars of the screen, fetch the next batch.
 function maybeGrowTop(): void {
@@ -4702,16 +4766,7 @@ function maybeGrowTop(): void {
   const pager = topPager;
   if (!r?.showcase || !r.entries || !pager || pager.done || topGrowing) return;
   if (r.entries.length >= LINE_MAX || r.x > GROW_AHEAD) return;
-  topGrowing = true;
-  void pager
-    .next(Math.min(LINE_BATCH, LINE_MAX - r.entries.length))
-    .then((cars) => {
-      if (pager === topPager) extendReel(regEntries(cars));
-    })
-    .catch((err) => console.error('Line batch failed', err))
-    .finally(() => {
-      if (pager === topPager) topGrowing = false;
-    });
+  void loadNextTopBatch(Math.min(LINE_BATCH, LINE_MAX - r.entries.length));
 }
 
 function setReelLoading(id: ReelId, on: boolean): void {
@@ -4723,6 +4778,7 @@ async function startMainline(): Promise<void> {
   const token = ++mainlineToken;
   topPager = null;
   topGrowing = false;
+  topGrowth = null;
   reelDescription.textContent = '';
   setReelLoading('top', true);
   startReel([], title, false);
@@ -5331,6 +5387,7 @@ async function buildMySubwayLine(): Promise<{ entries: RollEntry[]; pager: FeedP
 
 let subPager: FeedPager | null = null;
 let subGrowing = false;
+let subGrowth: Promise<number> | null = null;
 
 function loadSubImage(e: RollEntry, i: number, token: number): void {
   void entryImage(e).then((img) => {
@@ -5338,28 +5395,46 @@ function loadSubImage(e: RollEntry, i: number, token: number): void {
   });
 }
 
-// Subway rolls right-to-left with index 0 leading, so each batch couples on behind the tail.
-function maybeGrowSub(W: number, scale: number): void {
+function loadNextSubBatch(n = LINE_BATCH): Promise<number> {
   const pager = subPager;
-  if (!pager || pager.done || subGrowing || subwayReel.entries.length >= LINE_MAX) return;
-  if (subwayReel.sx + subwayReel.entries.length * CAR_WIDTH * scale > W + GROW_AHEAD * scale) return;
-  subGrowing = true;
   const token = subwayReel.token;
-  void pager
-    .next(Math.min(LINE_BATCH, LINE_MAX - subwayReel.entries.length))
+  if (!pager || pager.done) return Promise.resolve(0);
+  if (subGrowth) return subGrowth;
+  const before = subwayReel.entries.length;
+  subGrowing = true;
+  let request: Promise<number>;
+  request = pager
+    .next(n)
     .then((cars) => {
-      if (pager !== subPager || token !== subwayReel.token) return;
+      if (pager !== subPager || token !== subwayReel.token) return 0;
       const have = new Set(subwayReel.entries.map((e) => e.reg?.id));
       const add = regEntries(cars).filter((e) => !have.has(e.reg?.id));
       const start = subwayReel.entries.length;
       subwayReel.entries.push(...add);
       subwayReel.images.push(...add.map(() => null));
       add.forEach((e, j) => loadSubImage(e, start + j, token));
+      return subwayReel.entries.length - before;
     })
-    .catch((err) => console.error('Line batch failed', err))
+    .catch((err) => {
+      console.error('Line batch failed', err);
+      return -1;
+    })
     .finally(() => {
-      if (pager === subPager) subGrowing = false;
+      if (subGrowth === request) {
+        subGrowth = null;
+        subGrowing = false;
+      }
     });
+  subGrowth = request;
+  return request;
+}
+
+// Subway rolls right-to-left with index 0 leading, so each batch couples on behind the tail.
+function maybeGrowSub(W: number, scale: number): void {
+  const pager = subPager;
+  if (!pager || pager.done || subGrowing || subwayReel.entries.length >= LINE_MAX) return;
+  if (subwayReel.sx + subwayReel.entries.length * CAR_WIDTH * scale > W + GROW_AHEAD * scale) return;
+  void loadNextSubBatch(Math.min(LINE_BATCH, LINE_MAX - subwayReel.entries.length));
 }
 
 function loadSubwayLine(yard: YardId | null): void {
@@ -5374,6 +5449,7 @@ function loadSubwayLine(yard: YardId | null): void {
   subwayReel.sx = Number.NaN;
   subPager = null;
   subGrowing = false;
+  subGrowth = null;
   subwayTitle.textContent = myWork.sub ? 'My Subways' : 'Subway';
   setReelLoading('sub', true);
   void (myWork.sub ? buildMySubwayLine() : buildSubwayLine()).then(async ({ entries, pager }) => {

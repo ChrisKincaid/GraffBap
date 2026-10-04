@@ -1823,9 +1823,37 @@ body.showcase .dispatch {
   font: 12px/1.4 system-ui, sans-serif;
 }
 
-.cc-preview,
-.cc-nav {
+.cc-preview {
   display: none;
+}
+
+.cc-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.cc-nav button {
+  min-width: 68px;
+  min-height: 34px;
+  padding: 0 8px;
+  border: 1px solid #3a3d44;
+  border-radius: 6px;
+  background: #15171b;
+  color: #e8e6e1;
+  font: 700 11px/1 ui-monospace, monospace;
+  cursor: pointer;
+}
+
+.cc-nav button:disabled {
+  opacity: 0.35;
+}
+
+#cc-count {
+  color: #8a877f;
+  font: 700 11px/1 ui-monospace, monospace;
 }
 
 @media (max-width: 700px) {
@@ -3443,7 +3471,6 @@ body.rollby #toolbar {
   width: 100px;
 }
 
-/* The paint action gets its own labelled row: Edit and Use This Car must never look alike. */
 #car-card .cc-paint {
   display: flex;
   align-items: center;
