@@ -16,6 +16,7 @@ import {
 import { db } from './firebase';
 import { httpsCallable } from 'firebase/functions';
 import { graffitiFunctions, requireAbuseProtection } from './protected-actions';
+import type { PromoAd } from './promoService';
 
 // Global car registry: every departed piece, its lifecycle status and community score.
 export type CarStatus = 'departed' | 'hall_of_fame' | 'museum' | 'buffed' | 'banned' | 'quarantined';
@@ -111,20 +112,34 @@ export interface VoteResult {
 
 // One vote per profile per car; switching moves the vote. HoF promotion happens in the same transaction.
 export async function voteRegistryCar(id: string, kind: 'props' | 'toy'): Promise<VoteResult> {
+  return voteTarget<RegistryCar>(id, kind, 'artwork');
+}
+
+export async function votePromoAd(id: string, kind: 'props' | 'toy'): Promise<{
+  car: PromoAd; already: boolean; promoted: boolean;
+}> {
+  return voteTarget<PromoAd>(id, kind, 'promo');
+}
+
+async function voteTarget<T>(id: string, kind: 'props' | 'toy', target: 'artwork' | 'promo'): Promise<{
+  car: T; already: boolean; promoted: boolean;
+}> {
   requireAbuseProtection();
-  return (await httpsCallable<{ id: string; kind: 'props' | 'toy' }, VoteResult>(
+  return (await httpsCallable<{ id: string; kind: 'props' | 'toy'; target: 'artwork' | 'promo' }, {
+    car: T; already: boolean; promoted: boolean;
+  }>(
     graffitiFunctions, 'graffitiVote',
-  )({ id, kind })).data;
+  )({ id, kind, target })).data;
 }
 
 export type ReportReason = 'harassment' | 'explicit' | 'hate' | 'spam' | 'other';
 
-export async function reportRegistryCar(id: string, reason: ReportReason, captchaToken?: string): Promise<'already' | 'reported'> {
+export async function reportRegistryCar(id: string, reason: ReportReason, captchaToken?: string, target: 'artwork' | 'promo' = 'artwork'): Promise<'already' | 'reported'> {
   requireAbuseProtection();
   return (await httpsCallable<
-    { id: string; reason: ReportReason; captchaToken?: string },
+    { id: string; reason: ReportReason; captchaToken?: string; target: 'artwork' | 'promo' },
     { result: 'already' | 'reported' }
-  >(graffitiFunctions, 'graffitiReport')({ id, reason, ...(captchaToken ? { captchaToken } : {}) })).data.result;
+  >(graffitiFunctions, 'graffitiReport')({ id, reason, target, ...(captchaToken ? { captchaToken } : {}) })).data.result;
 }
 
 export interface FeedPager {

@@ -23,6 +23,7 @@ const captchaContainer = document.getElementById('report-captcha')!;
 let widget: number | undefined;
 let captchaLoading: Promise<CaptchaApi> | null = null;
 let selectedId: string | null = null;
+let selectedTarget: 'artwork' | 'promo' = 'artwork';
 let finish: ((result: 'already' | 'reported' | null) => void) | null = null;
 
 async function showChallenge(): Promise<void> {
@@ -72,7 +73,7 @@ form.addEventListener('submit', async event => {
   try {
     await ensureAnonymous();
     const captchaToken = widget === undefined ? undefined : window.grecaptcha?.getResponse(widget);
-    const result = await reportRegistryCar(selectedId, reason.value as ReportReason, captchaToken);
+    const result = await reportRegistryCar(selectedId, reason.value as ReportReason, captchaToken, selectedTarget);
     finish?.(result);
     finish = null;
     dialog.close();
@@ -105,9 +106,10 @@ dialog.addEventListener('close', () => {
   finish = null;
 });
 
-export function reportArtwork(id: string): Promise<'already' | 'reported' | null> {
+export function reportArtwork(id: string, target: 'artwork' | 'promo' = 'artwork'): Promise<'already' | 'reported' | null> {
   if (dialog.open) return Promise.resolve(null);
   selectedId = id;
+  selectedTarget = target;
   form.reset();
   message.textContent = '';
   if (widget !== undefined) window.grecaptcha?.reset(widget);

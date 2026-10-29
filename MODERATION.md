@@ -51,6 +51,37 @@ were not modified or redeployed during this release.
 
 ## Behavior
 
+### Promo support
+
+Promotional cars open the same gallery card as artwork. Visit Promo is shown
+only for promos and opens the destination separately; clicking a car does not
+automatically navigate away. The button accepts HTTP(S) URLs only.
+
+The protected vote/report/moderate callables accept an optional
+`target: 'artwork' | 'promo'` (default: artwork). Promo targets use the ad's
+Firestore ID under `promo_ads`, including per-UID votes/reports. Ad IDs must not
+be treated as `graffiti_cars` IDs. The same account requirement for ratings,
+anonymous reporting, App Check, quotas, CAPTCHA, and moderator permissions apply
+to both kinds; quotas are shared, not doubled.
+
+Admin moderation includes reported and ignored promos with separate collection
+pagination. Ignore/restore/clear preserve existing semantics; Deactivate Ad
+sets `status: 'inactive'` rather than buffing artwork. Ads never affect artwork
+rolling counts or Hall of Fame promotion. Individual promo vote/report documents
+cannot be written by public clients; writes go through protected callables.
+IMPORTANT: the user-managed production rules retain blanket public reads for
+promo subcollections, including individual votes/reports. The proposed private-read
+rule was backed up separately, not deployed. Local rules were synchronized exactly
+to the production rules before this release. Do not claim these promo records
+are private until a separately approved rules update is applied.
+
+Release scope is the three changed callables, Graph Bap hosting, and Admin
+hosting only. The existing live promo collection permissions are already present.
+No Firestore/Storage rules, indexes, unrelated Functions, Public hosting, or
+recorder deployment is included.
+
+### Artwork behavior
+
 - Anonymous visitors can browse, paint, publish, and report. Ratings require a
   non-anonymous BoxBap account, enforced by the UI and callable backend.
 - Shared ratings allow one choice per account/car; switching replaces the vote.

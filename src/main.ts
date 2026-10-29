@@ -20,6 +20,7 @@ import {
   retirePiece,
   updatePieceImage,
   voteRegistryCar,
+  votePromoAd,
   type FeedPager,
   type FeedSort,
   type RegistryCar,
@@ -39,6 +40,13 @@ import {
 } from './services/firebase';
 import { reportArtwork } from './report-dialog';
 import { actionError } from './services/protected-actions';
+import { PromoService, type PromoAd } from './services/promoService';
+
+const promoService = new PromoService();
+let globalCarsSpawned = 0;
+const promoReady = promoService.init()
+  .catch((err) => console.error('Promo Service initialization failed', err));
+let feedAssignment: Promise<unknown> = Promise.resolve();
 
 const CAR_WIDTH = 4000;
 const CAR_HEIGHT = 1200;
@@ -2141,7 +2149,7 @@ viewport.addEventListener('pointerdown', (e) => {
     if (e.button === 0) {
       const i = rollCarAt(e.clientX, e.clientY);
       // The reel shows the car's card; the editor's Roll-By jumps into painting that car.
-      if (roll.showcase) showCard(i);
+      if (roll.showcase) inspectRollingCar(i, 'top');
       else if (i >= 0) exitRollBy(i);
     }
     return;
@@ -3475,6 +3483,11 @@ interface RollEntry {
   // Set for departed cars from the global registry (image, status and votes live there).
   reg?: RegistryCar;
   archiveImage?: string;
+  isPromo?: boolean;
+  id?: string;
+  promoAd?: PromoAd;
+  promoLink?: string;
+  promoImage?: string;
 }
 
 const rollCount = (r: RollState) => r.entries?.length ?? CAR_COUNT;
@@ -3536,7 +3549,13 @@ async function loadEntryImage(e: RollEntry, i: number, token: number): Promise<v
 async function entryImage(e: RollEntry): Promise<CanvasImageSource | null> {
   try {
     let img: CanvasImageSource | null = null;
-    if (e.reg) {
+    if (e.isPromo && e.promoImage) {
+      const promo = new Image();
+      promo.crossOrigin = 'anonymous';
+      promo.src = e.promoImage;
+      await promo.decode();
+      img = await createImageBitmap(promo, ROLL_BITMAP);
+    } else if (e.reg) {
       img = await rollBitmap(await decodeDataUrl(e.reg.image));
     } else if (e.archiveImage) {
       img = await rollBitmap(await decodeDataUrl(e.archiveImage));
@@ -3582,7 +3601,6 @@ function enterRollBy(showcase = false, entries: RollEntry[] | null = null): void
   const token = ++rollToken;
   const L = activeRollLayout(showcase);
   roll = {
-    // The landing reel rolls eastbound (left-to-right), so it starts just past the train's end.
     x: showcase ? (entries?.length ?? CAR_COUNT) * CAR_WIDTH : -L.W / L.scale,
     speedIdx: 1,
     paused: false,
@@ -3755,6 +3773,8 @@ const ccBy = carCard.querySelector('.cc-by') as HTMLElement;
 const ccPropsBtn = document.getElementById('cc-props') as HTMLButtonElement;
 const ccToyBtn = document.getElementById('cc-toy') as HTMLButtonElement;
 const ccReportBtn = document.getElementById('cc-report') as HTMLButtonElement;
+const visitPromoBtn = document.getElementById('visit-promo-btn') as HTMLButtonElement;
+const promoSlidePanel = document.getElementById('promo-slide-panel')!;
 const ccCloseBtn = document.getElementById('cc-close') as HTMLButtonElement;
 const ccPrevBtn = document.getElementById('cc-prev') as HTMLButtonElement;
 const ccNextBtn = document.getElementById('cc-next') as HTMLButtonElement;
@@ -3893,19 +3913,22 @@ function drawCrossing(
 const presetBaseProps = (k: number) => 12 + ((k * 37) % 48);
 const entryAt = (i: number): RollEntry | null => roll?.entries?.[i] ?? null;
 const entryKey = (e: RollEntry) =>
-  e.reg ? `reg/${e.reg.id}` : e.yard === 'preset' ? `preset/${e.index}` : localKey(e.yard, e.index);
+  e.isPromo ? `promo/${e.id}` : e.reg ? `reg/${e.reg.id}` : e.yard === 'preset' ? `preset/${e.index}` : localKey(e.yard, e.index);
 const entryOrigin = (e: RollEntry) => {
+  if (e.isPromo) return 'PROMO ONLY';
   if (e.yard === 'preset') return 'Community Line';
   const tag = e.reg?.status === 'hall_of_fame' ? ' · Hall of Fame' : e.reg?.status === 'museum' ? ' · Museum' : '';
   return YARDS[e.yard].label + tag;
 };
 
 function entryProps(e: RollEntry, meta: Record<string, CarMeta>): number {
+  if (e.isPromo) return e.promoAd?.props ?? 0;
   if (e.reg) return e.reg.props;
   return (meta[entryKey(e)]?.props ?? 0) + (e.yard === 'preset' ? presetBaseProps(e.index) : 0);
 }
 
 function entryToys(e: RollEntry, meta: Record<string, CarMeta>): number {
+  if (e.isPromo) return e.promoAd?.toys ?? 0;
   return e.reg ? e.reg.toys : (meta[entryKey(e)]?.toys ?? 0);
 }
 
@@ -4099,17 +4122,19 @@ function reloadReel(id: ReelId): void {
 
 function reportEntry(e: RollEntry, id: ReelId): void {
   const reg = e.reg;
+  const targetId = e.isPromo ? e.id : reg?.id;
+  const reportKey = e.isPromo ? entryKey(e) : reg?.id;
   if (!entryPainted(e)) return;
-  if (!reg) {
+  if (!targetId || !reportKey) {
     showToast('Only published community artwork can be sent to moderators.');
     return;
   }
-  void reportArtwork(reg.id)
+  void reportArtwork(targetId, e.isPromo ? 'promo' : 'artwork')
     .then((res) => {
       if (res === null) return;
       if (res === 'already') showToast('You already reported this car.');
       else showToast('Report received - thanks for helping keep the line clean.');
-      markReported(reg.id);
+      markReported(reportKey);
       renderReelBar(id);
     })
     .catch((err) => {
@@ -4147,6 +4172,8 @@ function showCard(i: number, src: 'top' | 'sub' = 'top'): void {
   const frame = document.getElementById(src === 'sub' ? 'subway-frame' : 'showcase-frame');
   frame?.classList.toggle('has-selection', !!e);
   if (!e) {
+    setPromoDrawer(false);
+    visitPromoBtn.onclick = null;
     carCard.style.left = '';
     carCard.style.top = '';
     return;
@@ -4155,10 +4182,32 @@ function showCard(i: number, src: 'top' | 'sub' = 'top'): void {
   renderCard(e);
 }
 
+function setPromoDrawer(open: boolean): void {
+  promoSlidePanel.classList.toggle('is-open', open);
+  promoSlidePanel.setAttribute('aria-hidden', String(!open));
+  promoSlidePanel.inert = !open;
+}
+
+function openPromoLink(e: RollEntry): void {
+  try {
+    const destination = new URL(e.promoLink ?? '');
+    if (!['https:', 'http:'].includes(destination.protocol)) throw new Error('Unsupported promo destination protocol');
+    window.open(destination.href, '_blank', 'noopener,noreferrer');
+  } catch (err) {
+    console.error('Unable to open promo destination', err);
+    showToast('This promo destination is unavailable.');
+  }
+}
+
 function renderCard(e: RollEntry): void {
+  setPromoDrawer(!!e.isPromo);
+  visitPromoBtn.onclick = e.isPromo ? () => openPromoLink(e) : null;
+  const inspectButton = document.getElementById('cc-bench')!;
+  inspectButton.setAttribute('aria-label', e.isPromo ? 'Visit promo website' : 'Open Bench View');
+  inspectButton.title = e.isPromo ? 'Visit promo website' : 'Bench View – inspect this car in high resolution';
   const meta = readMeta();
   const m = meta[entryKey(e)] ?? {};
-  const born = m.savedAt ?? e.reg?.createdAt ?? m.createdAt;
+  const born = e.isPromo ? e.promoAd?.createdAt : m.savedAt ?? e.reg?.createdAt ?? m.createdAt;
   ccDate.textContent = born
     ? `Painted ${new Date(born).toLocaleString(undefined, { month: 'numeric', day: 'numeric', year: '2-digit', hour: 'numeric', minute: '2-digit' })}`
     : e.yard === 'preset'
@@ -4168,13 +4217,13 @@ function renderCard(e: RollEntry): void {
   ccBy.textContent = writer ? `by ${writer}` : '';
   ccBy.title = writer || '';
   const painted = entryPainted(e);
-  const reported = !!e.reg && hasReported(e.reg.id);
+  const reported = e.isPromo ? hasReported(entryKey(e)) : !!e.reg && hasReported(e.reg.id);
   const mine = !!e.reg?.writerUid && e.reg.writerUid === currentUser?.uid;
   ccPropsBtn.disabled = !painted;
   ccToyBtn.disabled = !painted;
   // Report always stays live so a car can't be held unreportable by painting on it.
-  ccReportBtn.disabled = !painted || !e.reg || reported;
-  ccReportBtn.title = !e.reg ? 'Only published community artwork can be reported' :
+  ccReportBtn.disabled = !painted || !(e.isPromo ? e.id : e.reg) || reported;
+  ccReportBtn.title = !e.reg && !e.isPromo ? 'Only published community artwork can be reported' :
     reported ? 'Already reported' : 'Report this car to moderators - no account required';
   ccPaintBtn.hidden = !mine;
   if (mine) renderPaintBtn();
@@ -4182,18 +4231,16 @@ function renderCard(e: RollEntry): void {
   renderRating(e, cardRatingUI);
   if (e.reg?.basedOnWriter) ccBy.textContent = `${ccBy.textContent} · over ${e.reg.basedOnWriter}`;
   const n = reelLength(cardSrc);
-  // The top line is stored reversed (see startReel), so number it from the leading car.
-  ccCount.textContent = n ? `${cardSrc === 'top' ? n - cardCar : cardCar + 1} / ${n}` : '';
-  const canPageNext =
-    (cardSrc === 'top' && !myWork.top && !!topPager && !topPager.done) ||
-    (cardSrc === 'sub' && !myWork.sub && !!subPager && !subPager.done);
+  ccCount.textContent = n ? `${cardCar + 1} / ${n}` : '';
+  const canPagePrevious = cardSrc === 'top' && !myWork.top && !!topPager && !topPager.done;
+  const canPageNext = cardSrc === 'sub' && !myWork.sub && !!subPager && !subPager.done;
   ccPrevBtn.disabled =
-    n < 2 ||
-    (cardSrc === 'top' && !myWork.top && !!topPager && cardCar === n - 1) ||
+    (n < 2 && !canPagePrevious) ||
+    (cardSrc === 'top' && !myWork.top && !!topPager && cardCar === 0 && topPager.done) ||
     (cardSrc === 'sub' && !myWork.sub && !!subPager && cardCar === 0);
   ccNextBtn.disabled =
     (n < 2 && !canPageNext) ||
-    (cardSrc === 'top' && !myWork.top && !!topPager && cardCar === 0 && topPager.done) ||
+    (cardSrc === 'top' && !myWork.top && !!topPager && cardCar === n - 1) ||
     (cardSrc === 'sub' && !myWork.sub && !!subPager && cardCar === n - 1 && subPager.done);
   drawCardPreview(e);
 }
@@ -4258,7 +4305,7 @@ function reelLength(src: ReelId): number {
 function stepCard(dir: 1 | -1): void {
   const n = reelLength(cardSrc);
   if (cardCar < 0 || n < 1) return;
-  if (dir === 1 && cardSrc === 'top' && !myWork.top && cardCar === 0 && topPager && !topPager.done) {
+  if (dir === -1 && cardSrc === 'top' && !myWork.top && cardCar === 0 && topPager && !topPager.done) {
     ccPrevBtn.disabled = ccNextBtn.disabled = true;
     void loadNextTopBatch().then((added) => {
       if (cardSrc !== 'top' || cardCar < 0) return;
@@ -4282,8 +4329,7 @@ function stepCard(dir: 1 | -1): void {
     });
     return;
   }
-  const step = cardSrc === 'top' ? -dir : dir;
-  const next = cardCar + step;
+  const next = cardCar + dir;
   const paged = (cardSrc === 'top' && !myWork.top && topPager) || (cardSrc === 'sub' && !myWork.sub && subPager);
   if (paged && (next < 0 || next >= n)) return;
   inspectRollingCar((next + n) % n, cardSrc);
@@ -4406,6 +4452,32 @@ function castVote(e: RollEntry, kind: VoteKind, done: () => void): void {
     requireAuth(() => castVote(e, kind, done), true);
     return;
   }
+  if (e.isPromo && e.id) {
+    const uid = currentUser.uid;
+    void votePromoAd(e.id, kind).then(result => {
+      for (const entry of [...(roll?.entries ?? []), ...subwayReel.entries, e, ...(benchEntry ? [benchEntry] : [])]) {
+        if (entry.isPromo && entry.id === e.id) {
+          entry.promoAd = result.car;
+          entry.props = result.car.props ?? 0;
+        }
+      }
+      const votes = readVotes();
+      votes[`${uid}|${entryKey(e)}`] = kind;
+      try {
+        localStorage.setItem(VOTES_KEY, JSON.stringify(votes));
+      } catch (err) {
+        console.warn('Rating saved, but this browser could not remember it locally.', err);
+      }
+      if (result.already) showToast(kind === 'props' ? 'You already dropped props on this car.' : 'You already called this one whack.');
+      done();
+      refreshCard();
+      if (benchEntry?.isPromo && benchEntry.id === e.id) renderRating(benchEntry, benchRatingUI());
+    }).catch(err => {
+      console.error('Promo vote failed', err);
+      showToast(actionError(err), 6000);
+    });
+    return;
+  }
   if (e.reg) return castRegistryVote(e, kind, done);
   const key = entryKey(e);
   const votes = readVotes();
@@ -4467,7 +4539,7 @@ async function decodeDataUrl(url: string): Promise<HTMLImageElement> {
 }
 
 function shouldBuff(e: RollEntry): boolean {
-  if (e.reg) return false;
+  if (e.reg || e.isPromo) return false;
   const meta = readMeta();
   const m = meta[entryKey(e)];
   if (m?.buffed) return false;
@@ -4663,6 +4735,47 @@ const LINE_MAX = 300;
 const GROW_AHEAD = 8 * CAR_WIDTH;
 const regEntries = (cars: RegistryCar[]) => cars.map(regEntry).filter((e): e is RollEntry => !!e);
 
+// Serialize both tracks' allocations so async page loads share one exact interval.
+function assignFeedCars(load: (count: number) => Promise<RollEntry[]>, count: number, subway: boolean): Promise<RollEntry[]> {
+  const pending = feedAssignment.then(async () => {
+    await promoReady;
+    const entries: RollEntry[] = [];
+    while (entries.length < count) {
+      const next = globalCarsSpawned + 1;
+      const frequency = promoService.getFrequency();
+      if (frequency > 0 && next % frequency === 0) {
+        const ad = promoService.getNextAd();
+        if (ad) {
+          entries.push({
+            yard: 'preset', index: 0, writer: 'PROMO ONLY', props: 0, sub: subway,
+            id: ad.id, isPromo: true, promoLink: ad.linkUrl, promoImage: ad.imageUrl, promoAd: ad,
+          });
+          globalCarsSpawned++;
+          continue;
+        }
+      }
+      const untilPromo = frequency > 0 ? frequency - (globalCarsSpawned % frequency) - 1 : count - entries.length;
+      const wanted = Math.min(count - entries.length, Math.max(1, untilPromo));
+      const cars = await load(wanted);
+      entries.push(...cars);
+      globalCarsSpawned += cars.length;
+      if (cars.length < wanted) break;
+    }
+    return entries;
+  });
+  feedAssignment = pending.catch((err) => console.error('Feed car assignment failed', err));
+  return pending;
+}
+
+function nextPromoFeedPage(pager: FeedPager, count: number, subway: boolean): Promise<RollEntry[]> {
+  return assignFeedCars(async n => regEntries(await withRetry(() => pager.next(n))), count, subway);
+}
+
+function promoPresetEntries(subway: boolean): Promise<RollEntry[]> {
+  const entries = presetEntries().map(e => ({ ...e, sub: subway, props: entryProps(e, readMeta()) }));
+  return assignFeedCars(async count => entries.splice(0, count), entries.length, subway);
+}
+
 async function buildMainline(): Promise<{ entries: RollEntry[]; pager: FeedPager | null }> {
   if (myWork.top) {
     const uid = currentUser?.uid;
@@ -4676,16 +4789,16 @@ async function buildMainline(): Promise<{ entries: RollEntry[]; pager: FeedPager
   }
   const pager = feedPager('freight', topSort);
   try {
-    const live = regEntries(await withRetry(() => pager.next(LINE_FIRST)));
+    const live = await nextPromoFeedPage(pager, LINE_FIRST, false);
     if (live.length) return { entries: live, pager };
   } catch {
     // Fall through to the samples only after every retry has failed.
   }
-  return { entries: presetEntries().map((e) => ({ ...e, props: entryProps(e, readMeta()) })), pager: null };
+  return { entries: await promoPresetEntries(false), pager: null };
 }
 function startReel(entries: RollEntry[], title: string, yardLine: boolean): void {
   if (roll && !roll.showcase) return;
-  // The top line rolls left-to-right, so the last car enters first: flip it so the feed's first car leads.
+  // The top train enters from the left, with the first feed car leading.
   entries = [...entries].reverse();
   resetReelSel('top');
   reelTitle.textContent = title;
@@ -4712,8 +4825,7 @@ function startReel(entries: RollEntry[], title: string, yardLine: boolean): void
 function extendReel(tail: RollEntry[]): void {
   if (!roll?.showcase || !roll.entries) return;
   const have = new Set(roll.entries.map((e) => e.reg?.id));
-  // Stored reversed (see startReel), so later feed cars go in front of index 0.
-  const add = tail.filter((e) => !have.has(e.reg?.id)).reverse();
+  const add = tail.filter((e) => e.isPromo || !have.has(e.reg?.id)).reverse();
   const k = add.length;
   if (!k) return;
   const token = ++rollToken;
@@ -4743,11 +4855,10 @@ function loadNextTopBatch(n = LINE_BATCH): Promise<number> {
   const before = rollCount(current);
   topGrowing = true;
   let request: Promise<number>;
-  request = pager
-    .next(n)
+  request = nextPromoFeedPage(pager, n, false)
     .then((cars) => {
       if (pager !== topPager || roll !== current) return 0;
-      extendReel(regEntries(cars));
+      extendReel(cars);
       return rollCount(current) - before;
     })
     .catch((err) => {
@@ -5018,6 +5129,13 @@ let benchToken = 0;
 const benchCam = { s: 1, tx: 0, ty: 0, fit: 1 };
 
 async function benchPaint(e: RollEntry): Promise<HTMLCanvasElement | ImageBitmap | null> {
+  if (e.isPromo && e.promoImage) {
+    const image = new Image();
+    image.crossOrigin = 'anonymous';
+    image.src = e.promoImage;
+    await image.decode();
+    return createImageBitmap(image, { resizeWidth: BODY.w, resizeHeight: BODY.h });
+  }
   if (e.reg) return createImageBitmap(await decodeDataUrl(e.reg.image));
   if (e.yard === 'preset') return presetPiece(e.index);
   await fetchLocal(e.yard, e.index);
@@ -5134,6 +5252,11 @@ document.getElementById('bench-close')!.addEventListener('click', closeBench);
 document.getElementById('cc-bench')!.addEventListener('click', () => {
   const i = cardCar;
   const src = cardSrc;
+  const entry = cardEntryAt(i);
+  if (entry?.isPromo) {
+    openPromoLink(entry);
+    return;
+  }
   showCard(-1);
   openBench(i, src);
 });
@@ -5390,12 +5513,12 @@ let subGeom = { W: 1, scale: 1, trainW: 1 };
 async function buildSubwayLine(): Promise<{ entries: RollEntry[]; pager: FeedPager | null }> {
   const pager = feedPager('subway', subSort);
   try {
-    const live = regEntries(await withRetry(() => pager.next(LINE_FIRST)));
+    const live = await nextPromoFeedPage(pager, LINE_FIRST, true);
     if (live.length) return { entries: live, pager };
   } catch {
     // Fall through to the samples only after every retry has failed.
   }
-  return { entries: presetEntries().map((e) => ({ ...e, sub: true, props: entryProps(e, readMeta()) })), pager: null };
+  return { entries: await promoPresetEntries(true), pager: null };
 }
 
 async function buildMySubwayLine(): Promise<{ entries: RollEntry[]; pager: FeedPager | null }> {
@@ -5427,12 +5550,11 @@ function loadNextSubBatch(n = LINE_BATCH): Promise<number> {
   const before = subwayReel.entries.length;
   subGrowing = true;
   let request: Promise<number>;
-  request = pager
-    .next(n)
+  request = nextPromoFeedPage(pager, n, true)
     .then((cars) => {
       if (pager !== subPager || token !== subwayReel.token) return 0;
       const have = new Set(subwayReel.entries.map((e) => e.reg?.id));
-      const add = regEntries(cars).filter((e) => !have.has(e.reg?.id));
+      const add = cars.filter((e) => e.isPromo || !have.has(e.reg?.id));
       const start = subwayReel.entries.length;
       subwayReel.entries.push(...add);
       subwayReel.images.push(...add.map(() => null));
