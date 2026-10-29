@@ -4,19 +4,18 @@ import {
   getCountFromServer,
   getDoc,
   getDocs,
-  increment,
   limit,
   orderBy,
   query,
-  runTransaction,
   setDoc,
   startAfter,
   where,
-  writeBatch,
   type QueryConstraint,
   type QueryDocumentSnapshot,
 } from 'firebase/firestore';
 import { db } from './firebase';
+import { httpsCallable } from 'firebase/functions';
+import { graffitiFunctions, requireAbuseProtection } from './protected-actions';
 
 // Global car registry: every departed piece, its lifecycle status and community score.
 export type CarStatus = 'departed' | 'hall_of_fame' | 'museum' | 'buffed' | 'banned' | 'quarantined';
@@ -51,7 +50,6 @@ export const HOF_STEP = 10;
 export const HOF_BATCH = 50;
 export const HOF_ROLLING_CAP = 100;
 export const ACTIVE_CAP = 5000;
-export const REPORT_LIMIT = 25;
 const DAY_MS = 86_400_000;
 const RECENT_WINDOW_MS = 30 * DAY_MS;
 // Rolling feeds only ever show these; buffed/banned/quarantined/museum never roll.
@@ -86,27 +84,8 @@ export async function registerDeparture(
   c: Pick<RegistryCar, 'yard' | 'division' | 'slot' | 'writer' | 'writerUid' | 'image' | 'createdAt'> &
     Partial<Pick<RegistryCar, 'basedOn' | 'basedOnWriter'>>,
 ): Promise<string> {
-  const ref = doc(collection(db, CARS));
-  const now = Date.now();
-  const car: Omit<RegistryCar, 'id'> = {
-    ...c,
-    departedAt: now,
-    updatedAt: now,
-    status: 'departed',
-    props: 0,
-    toys: 0,
-    net: 0,
-    reports: 0,
-    buffScore: buffScore(0, 0, [], c.createdAt, now),
-    rnd: Math.random(),
-    recentVotes: [],
-  };
-  const batch = writeBatch(db);
-  batch.set(ref, car);
-  batch.set(statsRef(), { active: increment(1) }, { merge: true });
-  await batch.commit();
-  await cullIfNeeded();
-  return ref.id;
+  const publish = httpsCallable<typeof c, { id: string }>(graffitiFunctions, 'graffitiPublish');
+  return (await publish(c)).data.id;
 }
 
 // Autosave while painting: only the artwork and its freshness stamp move.
@@ -116,29 +95,12 @@ export async function updatePieceImage(id: string, image: string): Promise<void>
 
 // Pulling your own piece off the line: it stops rolling but the document is kept.
 export async function retirePiece(id: string): Promise<void> {
-  const batch = writeBatch(db);
-  batch.update(carRef(id), { status: 'buffed' });
-  batch.set(statsRef(), { active: increment(-1) }, { merge: true });
-  await batch.commit();
+  await httpsCallable<{ id: string }, { success: boolean }>(graffitiFunctions, 'graffitiRetire')({ id });
 }
 
 export async function getRegistryCar(id: string): Promise<RegistryCar | null> {
   const snap = await getDoc(carRef(id));
   return snap.exists() ? toCar(id, snap.data()) : null;
-}
-
-// Past 5,000 rolling cars, the lowest buff scores among standard (non-HoF) cars get buffed.
-async function cullIfNeeded(): Promise<number> {
-  const stats = readStats((await getDoc(statsRef())).data());
-  const excess = stats.active - ACTIVE_CAP;
-  if (excess <= 0) return 0;
-  const snap = await getDocs(query(collection(db, CARS), where('status', '==', 'departed'), orderBy('buffScore', 'asc'), limit(excess)));
-  if (snap.empty) return 0;
-  const batch = writeBatch(db);
-  snap.docs.forEach((d) => batch.update(d.ref, { status: 'buffed' }));
-  batch.set(statsRef(), { active: increment(-snap.size) }, { merge: true });
-  await batch.commit();
-  return snap.size;
 }
 
 export interface VoteResult {
@@ -148,75 +110,21 @@ export interface VoteResult {
 }
 
 // One vote per profile per car; switching moves the vote. HoF promotion happens in the same transaction.
-export async function voteRegistryCar(id: string, uid: string, kind: 'props' | 'toy'): Promise<VoteResult> {
-  const voteRef = doc(db, CARS, id, 'votes', uid);
-  const res = await runTransaction(db, async (tx) => {
-    const [carSnap, voteSnap, statsSnap] = await Promise.all([tx.get(carRef(id)), tx.get(voteRef), tx.get(statsRef())]);
-    if (!carSnap.exists()) throw new Error('Car not found');
-    const car = toCar(id, carSnap.data());
-    const prev = voteSnap.exists() ? (voteSnap.data().kind as 'props' | 'toy') : null;
-    if (prev === kind) return { car, already: true, promoted: false, hofActive: 0 };
-    const now = Date.now();
-    let { props, toys } = car;
-    if (prev === 'props') props = Math.max(0, props - 1);
-    if (prev === 'toy') toys = Math.max(0, toys - 1);
-    if (kind === 'props') props++;
-    else toys++;
-    const recentVotes = [...(car.recentVotes ?? []).filter((t) => now - t <= RECENT_WINDOW_MS), now].slice(-200);
-    const net = props - toys;
-    const stats = readStats(statsSnap.data());
-    const promoted = car.status === 'departed' && net >= hofThreshold(stats.hofTotal);
-    const patch: Partial<RegistryCar> = {
-      props,
-      toys,
-      net,
-      recentVotes,
-      buffScore: buffScore(props, toys, recentVotes, car.createdAt, now),
-    };
-    if (promoted) {
-      patch.status = 'hall_of_fame';
-      patch.hofAt = now;
-      tx.set(statsRef(), { hofTotal: increment(1), hofActive: increment(1) }, { merge: true });
-    }
-    tx.update(carRef(id), patch);
-    tx.set(voteRef, { kind, at: now });
-    return { car: { ...car, ...patch }, already: false, promoted, hofActive: stats.hofActive + (promoted ? 1 : 0) };
-  });
-  if (res.promoted && res.hofActive > HOF_ROLLING_CAP) await retireToMuseum(res.hofActive - HOF_ROLLING_CAP);
-  return { car: res.car, already: res.already, promoted: res.promoted };
+export async function voteRegistryCar(id: string, kind: 'props' | 'toy'): Promise<VoteResult> {
+  requireAbuseProtection();
+  return (await httpsCallable<{ id: string; kind: 'props' | 'toy' }, VoteResult>(
+    graffitiFunctions, 'graffitiVote',
+  )({ id, kind })).data;
 }
 
-// Keeps at most 100 HoF cars rolling; the lowest-scoring (then oldest) move to the Museum.
-async function retireToMuseum(count: number): Promise<void> {
-  const snap = await getDocs(
-    query(collection(db, CARS), where('status', '==', 'hall_of_fame'), orderBy('net', 'asc'), orderBy('hofAt', 'asc'), limit(count)),
-  );
-  if (snap.empty) return;
-  const batch = writeBatch(db);
-  snap.docs.forEach((d) => batch.update(d.ref, { status: 'museum' }));
-  batch.set(statsRef(), { hofActive: increment(-snap.size), active: increment(-snap.size) }, { merge: true });
-  await batch.commit();
-}
+export type ReportReason = 'harassment' | 'explicit' | 'hate' | 'spam' | 'other';
 
-// One report per profile per car; 25 reports quarantine the car off every track.
-export async function reportRegistryCar(id: string, uid: string): Promise<'already' | 'reported' | 'quarantined'> {
-  const reportRef = doc(db, CARS, id, 'reports', uid);
-  return runTransaction(db, async (tx) => {
-    const [carSnap, repSnap] = await Promise.all([tx.get(carRef(id)), tx.get(reportRef)]);
-    if (!carSnap.exists()) throw new Error('Car not found');
-    if (repSnap.exists()) return 'already' as const;
-    const car = toCar(id, carSnap.data());
-    const reports = (car.reports ?? 0) + 1;
-    const quarantine = reports >= REPORT_LIMIT && ROLLING.includes(car.status);
-    tx.set(reportRef, { at: Date.now() });
-    tx.update(carRef(id), quarantine ? { reports, status: 'quarantined' } : { reports });
-    if (quarantine) {
-      const stats: Record<string, unknown> = { active: increment(-1) };
-      if (car.status === 'hall_of_fame') stats.hofActive = increment(-1);
-      tx.set(statsRef(), stats, { merge: true });
-    }
-    return quarantine ? ('quarantined' as const) : ('reported' as const);
-  });
+export async function reportRegistryCar(id: string, reason: ReportReason, captchaToken?: string): Promise<'already' | 'reported'> {
+  requireAbuseProtection();
+  return (await httpsCallable<
+    { id: string; reason: ReportReason; captchaToken?: string },
+    { result: 'already' | 'reported' }
+  >(graffitiFunctions, 'graffitiReport')({ id, reason, ...(captchaToken ? { captchaToken } : {}) })).data.result;
 }
 
 export interface FeedPager {

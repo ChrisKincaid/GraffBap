@@ -17,7 +17,6 @@ import {
   getRegistryCar,
   listMine,
   registerDeparture,
-  reportRegistryCar,
   retirePiece,
   updatePieceImage,
   voteRegistryCar,
@@ -38,6 +37,8 @@ import {
   signInWithGoogle,
   signOutUser,
 } from './services/firebase';
+import { reportArtwork } from './report-dialog';
+import { actionError } from './services/protected-actions';
 
 const CAR_WIDTH = 4000;
 const CAR_HEIGHT = 1200;
@@ -2362,7 +2363,7 @@ function isTyping(t: EventTarget | null): boolean {
 }
 
 window.addEventListener('keydown', (e) => {
-  if (authDialog.open || helpDialog.open || welcomeDialog.open) return;
+  if (document.querySelector('dialog[open]')) return;
   if (!benchEl.hidden) {
     if (e.key === 'Escape') {
       e.preventDefault();
@@ -4004,7 +4005,11 @@ function markReported(id: string): void {
     reports = {};
   }
   reports[`${currentUser?.uid ?? 'guest'}|${id}`] = true;
-  localStorage.setItem(LOCAL_REPORTS_KEY, JSON.stringify(reports));
+  try {
+    localStorage.setItem(LOCAL_REPORTS_KEY, JSON.stringify(reports));
+  } catch (err) {
+    console.warn('Report accepted, but this browser could not remember it locally.', err);
+  }
 }
 
 function renderReelBar(id: ReelId): void {
@@ -4094,28 +4099,22 @@ function reloadReel(id: ReelId): void {
 
 function reportEntry(e: RollEntry, id: ReelId): void {
   const reg = e.reg;
-  if (!currentUser) return requireAuth(() => reportEntry(e, id), true);
   if (!entryPainted(e)) return;
   if (!reg) {
-    markReported(entryKey(e));
-    renderReelBar(id);
-    showToast('Report sent – thanks for keeping the line clean.');
+    showToast('Only published community artwork can be sent to moderators.');
     return;
   }
-  void reportRegistryCar(reg.id, currentUser.uid)
+  void reportArtwork(reg.id)
     .then((res) => {
+      if (res === null) return;
       if (res === 'already') showToast('You already reported this car.');
-      else if (res === 'reported') showToast('Report sent – thanks for keeping the line clean.');
-      else {
-        showToast('Car quarantined and pulled from the tracks.');
-        reloadReel(id);
-      }
+      else showToast('Report received - thanks for helping keep the line clean.');
       markReported(reg.id);
       renderReelBar(id);
     })
     .catch((err) => {
       console.error('Report failed', err);
-      showToast('Report did not go through');
+      showToast(actionError(err), 6000);
     });
 }
 
@@ -4174,8 +4173,9 @@ function renderCard(e: RollEntry): void {
   ccPropsBtn.disabled = !painted;
   ccToyBtn.disabled = !painted;
   // Report always stays live so a car can't be held unreportable by painting on it.
-  ccReportBtn.disabled = !painted || reported;
-  ccReportBtn.title = reported ? 'Already reported' : 'Report this car to moderators';
+  ccReportBtn.disabled = !painted || !e.reg || reported;
+  ccReportBtn.title = !e.reg ? 'Only published community artwork can be reported' :
+    reported ? 'Already reported' : 'Report this car to moderators - no account required';
   ccPaintBtn.hidden = !mine;
   if (mine) renderPaintBtn();
   ccPropsCount.textContent = String(entryProps(e, meta));
@@ -4402,7 +4402,7 @@ function renderRating(e: RollEntry, ui: RatingUI): void {
 
 // One vote per BoxBap.com profile per car (props OR toy); switching moves the vote. Recorded on this device.
 function castVote(e: RollEntry, kind: VoteKind, done: () => void): void {
-  if (!currentUser) {
+  if (!currentUser || currentUser.isAnonymous) {
     requireAuth(() => castVote(e, kind, done), true);
     return;
   }
@@ -4435,13 +4435,17 @@ function castVote(e: RollEntry, kind: VoteKind, done: () => void): void {
 function castRegistryVote(e: RollEntry, kind: VoteKind, done: () => void): void {
   const reg = e.reg!;
   const uid = currentUser!.uid;
-  void voteRegistryCar(reg.id, uid, kind)
+  void voteRegistryCar(reg.id, kind)
     .then((r) => {
       e.reg = r.car;
       e.props = r.car.props;
       const votes = readVotes();
       votes[`${uid}|${entryKey(e)}`] = kind;
-      localStorage.setItem(VOTES_KEY, JSON.stringify(votes));
+      try {
+        localStorage.setItem(VOTES_KEY, JSON.stringify(votes));
+      } catch (err) {
+        console.warn('Rating saved, but this browser could not remember it locally.', err);
+      }
       if (r.already) showToast(kind === 'props' ? 'You already dropped props on this car.' : 'You already called this one whack.');
       else if (!roll?.showcase) (kind === 'props' ? playPuff : playPeel)();
       if (r.promoted) {
@@ -4451,7 +4455,7 @@ function castRegistryVote(e: RollEntry, kind: VoteKind, done: () => void): void 
     })
     .catch((err) => {
       console.error('Vote failed', err);
-      showToast('Vote did not go through');
+      showToast(actionError(err), 6000);
     });
 }
 

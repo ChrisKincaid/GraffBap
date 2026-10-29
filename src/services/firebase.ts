@@ -57,7 +57,8 @@ export interface PublicCarData {
   lastWriter: string;
 }
 
-const app = initializeApp(firebaseConfig);
+export const firebaseApp = initializeApp(firebaseConfig);
+const app = firebaseApp;
 export const auth = getAuth(app);
 
 const RTDB_URL = import.meta.env.VITE_FIREBASE_RTDB_URL || 'https://boombapboombox-a5b78-default-rtdb.firebaseio.com';

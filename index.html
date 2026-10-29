@@ -400,6 +400,25 @@
         <button id="auth-cancel" type="button">Cancel</button>
       </form>
     </dialog>
+    <dialog id="report-dialog" aria-labelledby="report-title">
+      <form id="report-form">
+        <h2 id="report-title">Report artwork</h2>
+        <p>No account required. Reports go to moderators; reporting does not automatically remove artwork.</p>
+        <label for="report-reason">Reason</label>
+        <select id="report-reason" required>
+          <option value="" disabled selected>Select a reason</option>
+          <option value="harassment">Harassment or threats</option>
+          <option value="explicit">Explicit content</option>
+          <option value="hate">Hate or discrimination</option>
+          <option value="spam">Spam</option>
+          <option value="other">Other inappropriate content</option>
+        </select>
+        <div id="report-captcha" hidden></div>
+        <p id="report-error" role="alert"></p>
+        <button id="report-submit" type="submit">Send report</button>
+        <button id="report-cancel" type="button">Cancel</button>
+      </form>
+    </dialog>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
