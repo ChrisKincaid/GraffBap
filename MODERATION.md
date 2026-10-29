@@ -44,10 +44,19 @@ clients write counts directly and are intentionally rejected by the new rules.
 Moderators still need the existing `graffiti-moderation` role permission;
 superadmin access remains available. Do not broaden permissions to mask a denial.
 
-The deployment CLI warns that the existing Node.js 20 Functions runtime will be
-decommissioned on 2026-10-30, and that legacy `functions.config()` is deprecated.
-These shared-backend migrations remain separate work; existing commerce Functions
-were not modified or redeployed during this release.
+The moderation/promo release did not migrate the shared backend runtime.
+On 2026-10-29, a separate runtime-only migration to Node.js 22 completed
+for all 17 existing first-generation Functions before Node.js 20's 2026-10-30
+decommission date. It reuses each Function's deployed source and configuration,
+not the local source tree (which does not include every deployed Function).
+Future deploys must use the matching Node.js 22 package engines and Firebase
+runtime setting. Legacy `functions.config()` migration remains separate work.
+All 17 Functions were verified ACTIVE, with their deployed source, triggers,
+environment/secrets, labels, and runtime settings otherwise unchanged. All
+Firebase rules releases were also unchanged. The TypeScript build, three policy
+tests, and key production dependency loads passed under Node.js 22; protected
+Graph Bap endpoints returned the expected unauthenticated responses. This was
+not an end-to-end payment or recording acceptance test.
 
 ## Behavior
 
