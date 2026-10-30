@@ -6739,7 +6739,11 @@ function confirmCompetitionEntry(): void {
   document.getElementById('competition-confirm-text')!.textContent = `${paintingCompetition.title} · closes ${competitionDeadline(paintingCompetition)}`;
   document.getElementById('competition-submit-error')!.textContent = '';
   const preview = document.getElementById('competition-confirm-preview') as HTMLCanvasElement;
-  preview.getContext('2d')!.drawImage(paintLayer, 0, 0, preview.width, preview.height);
+  const image = renderCarImage(baseIdFor(currentYard, currentCarIndex), paintLayer, true, preview.width / CAR_WIDTH);
+  preview.height = image.height;
+  const ctx = preview.getContext('2d')!;
+  ctx.clearRect(0, 0, preview.width, preview.height);
+  ctx.drawImage(image, 0, 0);
   submitDialog.showModal();
 }
 document.getElementById('competition-submit-cancel')!.addEventListener('click', () => submitDialog.close());
@@ -6753,7 +6757,7 @@ document.getElementById('competition-submit-confirm')!.addEventListener('click',
     if (currentUser.uid !== competitionPainterUid) throw new Error('Sign back into the account that started this competition draft.');
     await submitCompetition(paintingCompetition.id, {
       yard: currentYard, division: YARDS[currentYard].division, slot: currentCarIndex,
-      writer: writerHandle(currentUser), image: await encodeForUpload(copyBody()), createdAt: Date.now(),
+      writer: writerHandle(currentUser), image: await encodeForUpload(copyBody()),
     });
     savePending = false;
     submitDialog.close();

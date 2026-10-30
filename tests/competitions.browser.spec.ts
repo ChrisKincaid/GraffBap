@@ -158,11 +158,13 @@ test('normal painting is unchanged and Ads Only retains promo actions', async ({
   await expect(page.locator('#save-car .bar-label')).toHaveText('POST');
 });
 
-test('competition editor saves draft without publishing and submits only after confirmation', async ({ page }) => {
+for (const surface of ['train', 'subway']) {
+test(`${surface} competition draft previews the whole car and submits despite client clock skew`, async ({ page }) => {
   await login(page, await newLocalAccount(page, 'painter'));
   await page.locator('#competitions-start').click();
   await page.locator('#paint-start').click();
   await expect(page.locator('#enter-weekly')).toBeEnabled();
+  await page.locator('#competition-surface').selectOption(surface);
   await page.locator('#enter-weekly').click();
   await expect(page.locator('#competition-paint-banner')).toContainText('WEEKLY WILDSTYLE', { ignoreCase: true });
   await expect(page.locator('#save-car .bar-label')).toHaveText('SUBMIT ENTRY');
@@ -174,21 +176,55 @@ test('competition editor saves draft without publishing and submits only after c
   await page.mouse.up();
   await page.locator('#save-car').click();
   await expect(page.locator('#competition-confirm')).toBeVisible();
+  const preview = await page.locator('#competition-confirm-preview').evaluate(element => {
+    const canvas = element as HTMLCanvasElement;
+    const pixels = canvas.getContext('2d')!.getImageData(0, Math.floor(canvas.height * 0.75), canvas.width,
+      Math.floor(canvas.height * 0.25)).data;
+    let opaque = 0;
+    for (let i = 3; i < pixels.length; i += 4) if (pixels[i] > 0) opaque++;
+    return { width: canvas.width, height: canvas.height, opaque };
+  });
+  expect(preview.width).toBe(800);
+  expect(preview.height).toBe(204);
+  expect(preview.opaque).toBeGreaterThan(1000);
   await page.locator('#competition-submit-cancel').click();
   await expect(page).toHaveURL(/#yard$/);
   await page.locator('#back-dispatch').click();
   await page.locator('#paint-start').click();
   await expect(page.locator('#enter-weekly')).toBeEnabled();
+  await page.locator('#competition-surface').selectOption(surface);
   await page.locator('#enter-weekly').click();
   await expect(page.locator('#save-status')).toContainText('draft restored');
   await page.locator('#save-car').click();
   await expect(page.locator('#competition-confirm')).toBeVisible();
+  await page.clock.setFixedTime(new Date(Date.now() + (surface === 'train' ? 60_000 : -60_000)));
+  const received = page.waitForResponse(response => response.url().endsWith('/competitionSubmit'));
+  const before = Date.now();
   await page.locator('#competition-submit-confirm').click();
+  const response = await received;
+  expect(response.status()).toBe(200);
+  const payload = response.request().postDataJSON().data;
+  expect(payload).not.toHaveProperty('createdAt');
+  expect(payload.image).toMatch(/^data:image\/(?:png|webp|jpeg);base64,/);
+  expect(payload.image.length).toBeLessThanOrEqual(900_000);
+  expect(payload.division).toBe(surface === 'train' ? 'freight' : 'subway');
+  const { result } = await response.json();
+  const stored = await page.request.get(
+    `http://127.0.0.1:8080/v1/projects/demo-graphbap/databases/main/documents/graffiti_cars/${result.id}`,
+    { headers: { Authorization: 'Bearer owner' } },
+  );
+  expect(stored.ok()).toBe(true);
+  const { fields } = await stored.json();
+  const createdAt = Number(fields.createdAt.integerValue);
+  expect(createdAt).toBeGreaterThanOrEqual(before);
+  expect(createdAt).toBeLessThanOrEqual(Date.now());
+  expect(fields.createdAt).toEqual(fields.submittedAt);
   await expect(page).toHaveURL(/#competitions$/, { timeout: 20_000 });
   await page.locator('#paint-start').click();
   await expect(page.locator('#enter-weekly')).toBeDisabled();
   await expect(page.locator('#enter-weekly')).toContainText('Already entered');
 });
+}
 
 test('signed-in competition voting is positive-only and reporting reuses existing dialog', async ({ page }) => {
   await login(page, await newLocalAccount(page, 'voter'));

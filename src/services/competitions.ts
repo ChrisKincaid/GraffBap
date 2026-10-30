@@ -102,7 +102,7 @@ export function watchCompetitionEntries(
 
 export function submitCompetition(
   competitionId: string,
-  artwork: Pick<RegistryCar, 'yard' | 'division' | 'slot' | 'writer' | 'image' | 'createdAt'>,
+  artwork: Pick<RegistryCar, 'yard' | 'division' | 'slot' | 'writer' | 'image'>,
 ): Promise<{ id: string }> {
   requireAbuseProtection();
   return httpsCallable<typeof artwork & { competitionId: string }, { id: string }>(

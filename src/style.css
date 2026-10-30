@@ -762,8 +762,11 @@ body.competitions .term-logo {
   margin: 12px 0;
 }
 #competition-confirm-preview {
+  display: block;
   width: 100%;
-  background: #555;
+  height: auto;
+  background: #101216;
+  border-radius: 4px;
 }
 #competition-details p {
   margin: 14px 0;

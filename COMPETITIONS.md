@@ -95,6 +95,9 @@ POST with SUBMIT ENTRY. It saves competition drafts on this device only until
 explicit confirmation. Drafts are separated from normal artwork and account
 identities. Submitted snapshots cannot be repainted. After refreshing an active
 competition editor, choose Do Battle again to resume the local draft.
+Confirmation shows the selected train/subway with its paint using the same
+compositor as train exports; uploads still contain only the paint layer.
+Battle creation/submission timestamps come from the server, not the device clock.
 The competition indicator is a compact dark "BATTLE: title" button in the existing
 top action bar, not a floating yellow overlay. Click it for the full theme and
 deadline. It shrinks/ellipsizes before any action buttons, keeping Submit usable.
@@ -125,13 +128,15 @@ artwork, and `npm run dev:local`. They use Microsoft Edge through Playwright.
 Backend date tests inject time to verify rollover without changing the computer
 clock. They include cutoff, DST, archive, eligibility and retry behavior.
 
-The local browser suite passed all thirteen scenarios, including sparse launch,
+The local browser suite passed all fourteen scenarios, including sparse launch,
 separate weekly/monthly all-time rankings, and eight viewport sizes
 checking identical train geometry across Home/Current/Past, no page scrolling,
 and unclipped controls. It mutates demo entries,
 votes, and reports; reseed before a complete rerun and after testing to restore
-the sample showcase. Frontend build and all nine competition unit checks pass,
+the sample showcase. Frontend build and all ten competition unit checks pass,
 including the all-time pager's exact 500-entry ceiling.
+Freight and subway submission checks skew the client clock a minute ahead/behind,
+verify server-owned timestamps and paint-only uploads, and check full-car previews.
 
 Local tests do not establish production Cloud Scheduler delivery or real
 App Check/CAPTCHA operation. Production deployment requires a separate approved,

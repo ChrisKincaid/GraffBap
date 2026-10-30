@@ -46,6 +46,38 @@ test('competition vote path cannot reach ordinary Props/Toys backend', () => {
   assert.match(messages[0], /no downvotes/);
 });
 
+test('confirmation reuses the full selected train renderer and clears the old preview', () => {
+  const calls = [];
+  const preview = { width: 800, height: 240, getContext: () => ({
+    clearRect: (...args) => calls.push(['clear', ...args]),
+    drawImage: (...args) => calls.push(['draw', ...args]),
+  }) };
+  const image = { width: 800, height: 204 };
+  const paintLayer = {};
+  const context = extract(['confirmCompetitionEntry'], {
+    paintingCompetition: { title: 'Weekly Wildstyle' }, car: () => ({ hasPaint: true }),
+    competitionOpen: () => true, competitionDeadline: () => 'Monday', currentYard: 'subway',
+    currentCarIndex: 3, CAR_WIDTH: 4000, paintLayer,
+    baseIdFor: (yard, index) => {
+      assert.equal(yard, 'subway');
+      assert.equal(index, 3);
+      return 103;
+    },
+    renderCarImage: (...args) => { calls.push(['render', ...args]); return image; },
+    document: { getElementById: id => id === 'competition-confirm-preview' ? preview : {} },
+    submitDialog: { showModal: () => calls.push(['open']) },
+    showToast: () => assert.fail('Unexpected confirmation rejection'),
+  });
+  context.confirmCompetitionEntry();
+  context.confirmCompetitionEntry();
+  assert.equal(preview.height, 204);
+  assert.deepEqual(calls.slice(0, 4), [
+    ['render', 103, paintLayer, true, 0.2], ['clear', 0, 0, 800, 204],
+    ['draw', image, 0, 0], ['open'],
+  ]);
+  assert.deepEqual(calls.slice(4), calls.slice(0, 4));
+});
+
 test('Ads Only bypasses artwork queries and returns every active ad once', async () => {
   const context = extract(['specialFeed'], {
     competitionView: false, feedSelection: { top: 'ads' }, promoReady: Promise.resolve(),
