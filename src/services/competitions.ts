@@ -53,10 +53,14 @@ export async function competitionEntries(id: string): Promise<RegistryCar[]> {
       a.createdAt - b.createdAt || a.id.localeCompare(b.id));
 }
 
-export function competitionPager(id: string | null, division?: 'freight' | 'subway', uid?: string, kind?: Competition['kind']): FeedPager {
+export function competitionPager(
+  id: string | null, division?: 'freight' | 'subway', uid?: string,
+  kind?: Competition['kind'], randomStart?: string,
+): FeedPager {
   let cursor: QueryDocumentSnapshot | undefined;
   let done = false;
   let loaded = 0;
+  let wrapped = false;
   const maximum = id === null ? 500 : 1000;
   return {
     get done() { return done; },
@@ -72,11 +76,18 @@ export function competitionPager(id: string | null, division?: 'freight' | 'subw
           ] : [where('competitionId', '==', id)]),
           ...(division ? [where('division', '==', division)] : []),
           ...(uid ? [where('writerUid', '==', uid)] : []),
-          orderBy('competitionVotes', 'desc'), orderBy('createdAt'), orderBy(documentId()),
+          ...(id !== null && randomStart ? [
+            where(documentId(), wrapped ? '<' : '>=', randomStart), orderBy(documentId()),
+          ] : [orderBy('competitionVotes', 'desc'), orderBy('createdAt'), orderBy(documentId())]),
           ...(cursor ? [startAfter(cursor)] : []), limit(pageSize)));
         cursor = snapshot.docs.at(-1) ?? cursor;
         loaded += snapshot.size;
-        done = snapshot.size < pageSize || loaded >= maximum;
+        if (snapshot.size < pageSize && id !== null && randomStart && !wrapped) {
+          wrapped = true;
+          cursor = undefined;
+        } else {
+          done = snapshot.size < pageSize || loaded >= maximum;
+        }
         cars.push(...snapshot.docs.map(document => ({ ...document.data(), id: document.id } as RegistryCar))
           .filter(car => ['departed', 'hall_of_fame', 'museum'].includes(car.status)));
       }
@@ -92,12 +103,18 @@ export async function hasCompetitionEntry(competitionId: string, uid: string): P
 }
 
 export function watchCompetitionEntries(
-  id: string, receive: (cars: RegistryCar[]) => void, fail: (error: Error) => void,
+  ids: string[], receive: (cars: RegistryCar[], missing: string[]) => void, fail: (error: Error) => void,
 ): () => void {
-  return onSnapshot(query(collection(db, 'graffiti_cars'), where('competitionId', '==', id),
-    orderBy('competitionVotes', 'desc'), orderBy('createdAt'), limit(30)), snapshot => {
-    receive(snapshot.docs.map(document => ({ ...document.data(), id: document.id } as RegistryCar)));
-  }, fail);
+  const stops: (() => void)[] = [];
+  for (let offset = 0; offset < ids.length; offset += 30) {
+    const batch = ids.slice(offset, offset + 30);
+    stops.push(onSnapshot(query(collection(db, 'graffiti_cars'),
+      where(documentId(), 'in', batch)), snapshot => {
+      receive(snapshot.docs.map(document => ({ ...document.data(), id: document.id } as RegistryCar)),
+        batch.filter(id => !snapshot.docs.some(document => document.id === id)));
+    }, fail));
+  }
+  return () => stops.forEach(stop => stop());
 }
 
 export function submitCompetition(

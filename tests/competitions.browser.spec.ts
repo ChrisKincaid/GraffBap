@@ -244,6 +244,47 @@ test('signed-in competition voting is positive-only and reporting reuses existin
   await expect(page.locator('#cc-report')).toBeDisabled();
 });
 
+test('current battle totals update live without restarting the reel or closing the selected entry', async ({ page }) => {
+  await page.locator('#competitions-start').click();
+  await selectTrainEntry(page, '#subway-canvas');
+  const writer = (await page.locator('.cc-by').textContent())!.replace(/^by /, '');
+  const count = await page.locator('#cc-count').textContent();
+  const base = 'http://127.0.0.1:8080/v1/projects/demo-graphbap/databases/main/documents';
+  const headers = { Authorization: 'Bearer owner' };
+  const result = await page.request.post(`${base}:runQuery`, {
+    headers, data: { structuredQuery: {
+      from: [{ collectionId: 'graffiti_cars' }],
+      where: { fieldFilter: { field: { fieldPath: 'competitionId' }, op: 'EQUAL', value: { stringValue: 'weekly_2026-10-26' } } },
+    } },
+  });
+  expect(result.ok()).toBe(true);
+  const artwork = (await result.json()).find((row: { document?: { fields: { writer: { stringValue: string } } } }) =>
+    row.document?.fields.writer.stringValue === writer).document;
+  const id = artwork.name.split('/').at(-1);
+  const competition = await page.request.get(`${base}/graffiti_competitions/weekly_2026-10-26`, { headers });
+  const { fields } = await competition.json();
+  const patch = async (path: string, field: string, value: unknown) => {
+    const response = await page.request.patch(`${base}/${path}?updateMask.fieldPaths=${field}`, {
+      headers, data: { fields: { [field]: value } },
+    });
+    expect(response.ok()).toBe(true);
+  };
+  try {
+    await patch(`graffiti_cars/${id}`, 'competitionVotes', { integerValue: '77' });
+    await expect(page.locator('#cc-competition-status')).toContainText('77 votes');
+    await patch('graffiti_competitions/weekly_2026-10-26', 'entryCount',
+      { integerValue: String(Number(fields.entryCount.integerValue) + 1) });
+    await expect(page.locator('#sub-description')).toContainText(
+      `${Number(fields.entryCount.integerValue) + 1}/1000 entries`);
+    await expect(page.locator('#car-card')).toBeVisible();
+    await expect(page.locator('.cc-by')).toHaveText(`by ${writer}`);
+    await expect(page.locator('#cc-count')).toHaveText(count!);
+  } finally {
+    await patch(`graffiti_cars/${id}`, 'competitionVotes', artwork.fields.competitionVotes);
+    await patch('graffiti_competitions/weekly_2026-10-26', 'entryCount', fields.entryCount);
+  }
+});
+
 test('mobile keeps archive controls and paired actions within viewport', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.locator('#competitions-start').click();

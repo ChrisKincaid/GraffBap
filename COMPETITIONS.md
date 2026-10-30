@@ -57,8 +57,18 @@ The homepage has exactly four feed choices:
 
 Competitions reuses the train reels: monthly at the top and Weekly Wildstyle
 at the bottom, each accepting freight and subway artwork. No promos are injected
-into these views. Entries are paged in competition leaderboard order, not
-downloaded as one full collection.
+into these views. Archives and All-Time feeds page in leaderboard order rather
+than downloading the full collection.
+Open battles instead page through the full battle in a stable mixed order:
+entry IDs contain a server-generated SHA-256 hash of the writer UID. Each visit
+picks a random starting hash, walks IDs in order, and wraps once to the beginning.
+The same starting point is retained across filters and Current/Past navigation
+until the page is reloaded. Vote changes do not change positions or reset the
+train. This includes all entries, not just a shuffle of the highest-voted batch,
+without downloading up to 1,000 inline images at once. Live totals remain visible
+for loaded entries, including entries beyond the first thirty. New submissions
+can appear on a subsequent page load/revisit; they do not restart an active reel.
+The ordinary Yard feed/sorts and final ranking/tie rules are unchanged.
 
 A single toggle in the existing top header shows "Viewing: Current" and
 "Click to view Past", reversing both labels when clicked. It adds no page row.
@@ -128,13 +138,16 @@ artwork, and `npm run dev:local`. They use Microsoft Edge through Playwright.
 Backend date tests inject time to verify rollover without changing the computer
 clock. They include cutoff, DST, archive, eligibility and retry behavior.
 
-The local browser suite passed all fourteen scenarios, including sparse launch,
+The local browser suite passed all fifteen scenarios, including sparse launch,
 separate weekly/monthly all-time rankings, and eight viewport sizes
 checking identical train geometry across Home/Current/Past, no page scrolling,
 and unclipped controls. It mutates demo entries,
 votes, and reports; reseed before a complete rerun and after testing to restore
-the sample showcase. Frontend build and all ten competition unit checks pass,
+the sample showcase. Frontend build and all fourteen competition unit checks pass,
 including the all-time pager's exact 500-entry ceiling.
+Mixed-order tests traverse all 1,000 entries at middle/before-first/after-last
+starting points without duplicates or omissions, and live changes update the
+selected car without closing it or restarting its train.
 Freight and subway submission checks skew the client clock a minute ahead/behind,
 verify server-owned timestamps and paint-only uploads, and check full-car previews.
 

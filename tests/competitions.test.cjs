@@ -104,9 +104,11 @@ test('competition reels include both divisions, normal filters respect their div
     specialPagers: {},
     watchReelCompetition() {},
     allTimeCompetitionFeed: () => false,
-    selectedCompetition: () => ({ id: 'month' }),
-    competitionPager: (id, division) => {
+    selectedCompetition: () => ({ id: 'month' }), archivesView: false,
+    competitionOpen: () => true, competitionStart: () => 'month_seed',
+    competitionPager: (id, division, uid, kind, start) => {
       assert.equal(id, 'month', 'Only entries with the selected competition ID may be requested.');
+      assert.equal(start, 'month_seed', 'Current battles must use the stable mixed order.');
       return { next: async () => cars.filter(car => !division || car.division === division) };
     },
     myWork: { top: false }, regEntries: entries => entries,
@@ -115,6 +117,121 @@ test('competition reels include both divisions, normal filters respect their div
   context.competitionView = false;
   assert.equal((await context.specialFeed('top'))[0].id, 'freight');
   assert.equal((await context.specialFeed('top')).length, 1);
+});
+
+test('a battle keeps the same random start across reloads and filters during a visit', () => {
+  let draws = 0;
+  const context = extract(['competitionStart'], {
+    competitionStarts: new Map(),
+    crypto: { getRandomValues: bytes => { bytes.fill(++draws); return bytes; } },
+    Uint8Array,
+  });
+  const first = context.competitionStart('weekly_2026-10-26');
+  assert.match(first, /^weekly_2026-10-26_[a-f0-9]{64}$/);
+  assert.equal(context.competitionStart('weekly_2026-10-26'), first);
+  assert.notEqual(context.competitionStart('monthly_2026-10'), first);
+  assert.equal(draws, 2);
+});
+
+test('live vote changes update loaded cars beyond the first thirty without reshuffling', () => {
+  const entries = Array.from({ length: 64 }, (_, i) => ({
+    reg: { id: `entry-${i}`, competitionId: 'week', competitionVotes: 0 },
+  }));
+  const calls = [];
+  let receive;
+  const context = extract(['watchReelCompetition'], {
+    entrySubscriptions: {}, roll: { entries }, subwayReel: { entries: [] },
+    watchCompetitionEntries: (ids, callback) => {
+      calls.push(Array.from(ids));
+      receive = callback;
+      return () => {};
+    },
+    refreshCard() {}, renderCompetitionHeadings() {},
+    reloadReel: () => assert.fail('Vote changes must not restart or reorder the reel'),
+    console, showToast: () => assert.fail('Unexpected subscription failure'),
+  });
+  context.watchReelCompetition('top', 'week');
+  assert.equal(calls[0].length, 64);
+  receive([{ id: 'entry-63', competitionId: 'week', competitionVotes: 100, status: 'departed' }]);
+  assert.equal(entries[63].reg.competitionVotes, 100);
+  assert.equal(entries[63].reg.id, 'entry-63');
+  context.watchReelCompetition('top', 'week');
+  assert.equal(calls.length, 1, 'Already loaded entries must not be subscribed twice');
+});
+
+test('mixed pagination traverses all 1000 entries across the random start with no vote-order bias or duplicates', async () => {
+  const serviceSource = fs.readFileSync(path.join(root, 'src', 'services', 'competitions.ts'), 'utf8');
+  const serviceAst = ts.createSourceFile('competitions.ts', serviceSource, ts.ScriptTarget.Latest, true);
+  const pager = serviceAst.statements.find(node => ts.isFunctionDeclaration(node) && node.name.text === 'competitionPager');
+  const rows = Array.from({ length: 1000 }, (_, i) => ({
+    id: `week_${i.toString(16).padStart(64, '0')}`,
+    data: () => ({ status: 'departed', competitionVotes: i === 0 ? 9999 : 0 }),
+  }));
+  const start = rows[725].id;
+  const scope = vm.createContext({
+    exports: {}, db: {}, collection: () => ({}), documentId: () => '__name__',
+    where: (...args) => ({ where: args }), orderBy: (...args) => ({ order: args }),
+    limit: count => ({ limit: count }), startAfter: doc => ({ after: doc.id }),
+    query: (...constraints) => constraints,
+    getDocs: async constraints => {
+      assert.deepEqual(constraints.filter(item => item.order).map(item => item.order), [['__name__']]);
+      assert.ok(constraints.some(item => item.where?.[0] === 'competitionId' && item.where[2] === 'week'));
+      const [, op, pivot] = constraints.find(item => item.where?.[0] === '__name__').where;
+      const after = constraints.find(item => item.after)?.after;
+      const count = constraints.find(item => item.limit).limit;
+      const docs = rows.filter(row => (op === '>=' ? row.id >= pivot : row.id < pivot) && (!after || row.id > after)).slice(0, count);
+      return { docs, size: docs.length };
+    },
+  });
+  vm.runInContext(ts.transpileModule(pager.getText(serviceAst), {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+  }).outputText, scope);
+  for (const pivot of [start, 'week_' + '0'.repeat(64), 'week_' + 'f'.repeat(64)]) {
+    const feed = scope.competitionPager('week', undefined, undefined, undefined, pivot);
+    const ids = [];
+    while (!feed.done) ids.push(...(await feed.next(30)).map(car => car.id));
+    assert.equal(ids.length, 1000);
+    assert.equal(new Set(ids).size, 1000);
+    assert.deepEqual([...ids].sort(), rows.map(row => row.id));
+    assert.equal((await feed.next(30)).length, 0);
+    if (pivot === start) {
+      assert.equal(ids[0], rows[725].id);
+      assert.equal(ids[275], rows[0].id, 'Highest votes cannot move an entry ahead of the random sequence');
+    }
+  }
+});
+
+test('live subscriptions include every loaded ID in batches of thirty and report removed entries', () => {
+  const serviceSource = fs.readFileSync(path.join(root, 'src', 'services', 'competitions.ts'), 'utf8');
+  const serviceAst = ts.createSourceFile('competitions.ts', serviceSource, ts.ScriptTarget.Latest, true);
+  const helper = serviceAst.statements.find(node => ts.isFunctionDeclaration(node) && node.name.text === 'watchCompetitionEntries');
+  const batches = [], received = [];
+  let stopped = 0;
+  const scope = vm.createContext({
+    exports: {}, db: {}, collection: () => ({}), documentId: () => '__name__',
+    where: (...args) => ({ where: args }), query: (...constraints) => constraints,
+    onSnapshot: (constraints, receive) => {
+      const batch = constraints.find(item => item.where).where[2];
+      batches.push(Array.from(batch));
+      receive({ docs: batch.filter(id => id !== 'entry-63').map(id => ({
+        id, data: () => ({ status: 'departed', competitionVotes: 10 }),
+      })) });
+      return () => stopped++;
+    },
+  });
+  vm.runInContext(ts.transpileModule(helper.getText(serviceAst), {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+  }).outputText, scope);
+  const ids = Array.from({ length: 65 }, (_, i) => `entry-${i}`);
+  const stop = scope.watchCompetitionEntries(ids, (cars, missing) => received.push({
+    cars: Array.from(cars), missing: Array.from(missing),
+  }), () => assert.fail('Unexpected subscription failure'));
+  assert.deepEqual(batches.map(batch => batch.length), [30, 30, 5]);
+  assert.deepEqual(batches.flat(), ids);
+  assert.equal(received.flatMap(batch => batch.cars).length, 64);
+  assert.deepEqual(received.flatMap(batch => batch.missing), ['entry-63']);
+  stop();
+  assert.equal(stopped, 3);
 });
 
 test('this-week and this-month filters cannot fall back to older competitions', () => {

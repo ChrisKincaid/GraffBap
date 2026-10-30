@@ -6381,31 +6381,38 @@ const selectedArchive: Record<'monthly' | 'weekly', string> = { monthly: '', wee
 const rankedAvailable = { monthly: false, weekly: false };
 const feedSelection: Record<ReelId, string> = { top: 'all', sub: 'all' };
 const specialPagers: Partial<Record<ReelId, FeedPager>> = {};
+const competitionStarts = new Map<string, string>();
 const competitionTabs = document.getElementById('competition-tabs')!;
 const chooser = document.getElementById('competition-chooser') as HTMLDialogElement;
 const submitDialog = document.getElementById('competition-confirm') as HTMLDialogElement;
 let submitBusy = false;
 let competitionVoteBusy: string | null = null;
-const entrySubscriptions: Partial<Record<ReelId, { id: string; stop: () => void }>> = {};
+const entrySubscriptions: Partial<Record<ReelId, {
+  id: string; watched: Set<string>; stops: (() => void)[];
+}>> = {};
 
 function watchReelCompetition(id: ReelId, competitionId: string | null): void {
-  if (entrySubscriptions[id]?.id === competitionId) return;
-  entrySubscriptions[id]?.stop();
-  delete entrySubscriptions[id];
+  if (entrySubscriptions[id]?.id !== competitionId) {
+    entrySubscriptions[id]?.stops.forEach(stop => stop());
+    delete entrySubscriptions[id];
+  }
   if (!competitionId) return;
-  let first = true;
-  const stop = watchCompetitionEntries(competitionId, cars => {
-    if (first) { first = false; return; }
+  const subscription = entrySubscriptions[id] ??= { id: competitionId, watched: new Set<string>(), stops: [] };
+  const entries = id === 'top' ? roll?.entries ?? [] : subwayReel.entries;
+  const added = entries.flatMap(entry =>
+    entry.reg?.competitionId === competitionId && !subscription.watched.has(entry.reg.id) ? [entry.reg.id] : []);
+  if (!added.length) return;
+  added.forEach(key => subscription.watched.add(key));
+  subscription.stops.push(watchCompetitionEntries(added, (cars, missing = []) => {
+    if (entrySubscriptions[id] !== subscription) return;
     const entries = id === 'top' ? roll?.entries ?? [] : subwayReel.entries;
-    const changed = cars.filter(car => ['departed', 'hall_of_fame', 'museum'].includes(car.status))
-      .filter(car => competitionView || car.division === (id === 'top' ? 'freight' : 'subway'))
-      .filter(car => competitionView || !myWork[id] || car.writerUid === currentUser?.uid);
-    if (entries.length <= 30 && (changed.length !== entries.length || changed.some(car => !entries.some(entry => entry.reg?.id === car.id)))) {
+    if (cars.some(car => !['departed', 'hall_of_fame', 'museum'].includes(car.status)) ||
+        entries.some(entry => entry.reg && missing.includes(entry.reg.id))) {
       reloadReel(id);
       return;
     }
     for (const entry of entries) {
-      const current = changed.find(car => car.id === entry.reg?.id);
+      const current = cars.find(car => car.id === entry.reg?.id);
       if (current) entry.reg = current;
     }
     refreshCard();
@@ -6413,8 +6420,18 @@ function watchReelCompetition(id: ReelId, competitionId: string | null): void {
   }, error => {
     console.error('Competition entries subscription failed', error);
     showToast(actionError(error), 6000);
-  });
-  entrySubscriptions[id] = { id: competitionId, stop };
+  }));
+}
+
+function competitionStart(id: string): string {
+  let start = competitionStarts.get(id);
+  if (!start) {
+    // Entry IDs end in a server-generated SHA-256 hash of the writer UID.
+    const bytes = crypto.getRandomValues(new Uint8Array(32));
+    start = `${id}_${Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')}`;
+    competitionStarts.set(id, start);
+  }
+  return start;
 }
 
 function currentCompetition(kind: Competition['kind']): Competition | undefined {
@@ -6446,6 +6463,7 @@ function competitionSummary(competition: Competition): string {
 function renderCompetitionHeadings(): void {
   for (const id of ['top', 'sub'] as const) {
     const competition = selectedCompetition(id);
+    watchReelCompetition(id, competition?.id ?? null);
     const title = id === 'top' ? reelTitle : subwayTitle;
     const description = id === 'top' ? reelDescription : subDescription;
     document.getElementById(id === 'top' ? 'showcase-frame' : 'subway-frame')!.setAttribute('aria-label',
@@ -6508,7 +6526,9 @@ function renderCompetitionChrome(): void {
     header.classList.toggle('has-archive', showArchiveSelect);
     sort.hidden = sort.disabled;
     (header.querySelector('.reel-sort-label') as HTMLElement).hidden = sort.disabled;
-    sort.title = sort.disabled ? 'Competition entries are ordered by competition votes.' : 'Sort artwork';
+    sort.title = sort.disabled ? competitionView && archivesView
+      ? 'Competition entries are ordered by competition votes.'
+      : 'Current battle entries use a stable mixed order.' : 'Sort artwork';
   }
   renderCompetitionHeadings();
 }
@@ -6531,7 +6551,9 @@ async function specialFeed(id: ReelId): Promise<RollEntry[] | null> {
     const pager = competitionPager(allTimeCompetitionFeed(id) ? null : competition!.id,
       competitionView ? undefined : id === 'top' ? 'freight' : 'subway',
       !competitionView && myWork[id] ? currentUser?.uid : undefined,
-      allTimeCompetitionFeed(id) ? id === 'top' ? 'monthly' : 'weekly' : undefined);
+      allTimeCompetitionFeed(id) ? id === 'top' ? 'monthly' : 'weekly' : undefined,
+      competition && !(competitionView && archivesView) && competitionOpen(competition)
+        ? competitionStart(competition.id) : undefined);
     specialPagers[id] = pager;
     return regEntries(await pager.next(30));
   } catch (error) {
@@ -6618,10 +6640,23 @@ for (const kind of ['monthly', 'weekly'] as const) {
 }
 
 watchCompetitions(items => {
+  const selection = () => (['top', 'sub'] as const).map(id => {
+    const item = selectedCompetition(id);
+    return `${allTimeCompetitionFeed(id)}|${item?.id}|${item?.status}|${item?.opensAt}|${item?.closesAt}`;
+  }).join('/');
+  const previous = selection();
+  const counts = (['top', 'sub'] as const).map(id => selectedCompetition(id)?.entryCount);
   competitions = items;
   competitionsLoaded = true;
   updateArchiveChoices();
-  if (competitionView || Object.values(feedSelection).some(value => value !== 'all')) reloadCompetitionReels();
+  if (previous !== selection()) reloadCompetitionReels();
+  else {
+    renderCompetitionChrome();
+    (['top', 'sub'] as const).forEach((id, index) => {
+      const entries = id === 'top' ? roll?.entries ?? [] : subwayReel.entries;
+      if (!entries.length && selectedCompetition(id)?.entryCount !== counts[index]) reloadReel(id);
+    });
+  }
   refreshCard();
 }, error => {
   console.error('Competition subscription failed', error);
