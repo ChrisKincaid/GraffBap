@@ -58,6 +58,10 @@ export class PromoService {
     return this.frequency;
   }
 
+  getActiveAds(): PromoAd[] {
+    return this.activeAds.map(ad => ({ ...ad }));
+  }
+
   private shuffle(ads: PromoAd[]): void {
     for (let i = ads.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));

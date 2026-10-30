@@ -44,6 +44,8 @@ export interface RegistryCar {
   hofAt?: number;
   basedOn?: string;
   basedOnWriter?: string;
+  competitionId?: string;
+  competitionVotes?: number;
 }
 
 export const HOF_BASE = 5;

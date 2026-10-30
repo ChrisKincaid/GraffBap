@@ -193,6 +193,7 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="2" width="12" height="20" rx="2"/><path d="M12 6v8M9 11l3 3 3-3M10 18h4"/></svg>
         <span class="bar-label">Download</span>
       </button>
+      <button id="competition-paint-banner" type="button" hidden aria-label="Battle details"></button>
     </div>
     <div id="practice-note" hidden role="note">
       <strong>Practice Yard</strong>
@@ -207,13 +208,20 @@
       <header class="term-bar">
         <div class="term-status"><span class="dot" aria-hidden="true"></span><a class="term-link" href="https://boxbap.com" target="_blank" rel="noopener noreferrer">Brought to you by BoxBap.com</a></div>
         <div class="term-logo">GraffBap</div>
+        <nav id="competition-tabs" aria-label="Competitions" hidden>
+          <button id="competition-view-toggle" type="button" aria-label="Viewing Current competitions. Click to view Past competitions."><strong>Viewing: Current</strong><span>Click to view Past</span></button>
+        </nav>
         <div class="term-right">
           <button id="landing-account" type="button">Sign In with BoxBap.com</button>
         </div>
       </header>
+      <span id="competition-message" role="status"></span>
       <section id="showcase-frame" class="reel" aria-label="The Mainline">
         <div class="reel-head">
           <span id="reel-title" class="reel-title">THE MAINLINE · TOP-RATED</span>
+          <label class="feed-label">Show <select id="top-feed" aria-label="Show freight artwork" title="The Yard is the public feed, newest first by default. Battle choices show only this week's or this month's entries."><option value="all">The Yard</option><option value="weekly">This Week's Battle</option><option value="monthly">This Month's Battle</option><option value="ads">Ads Only</option></select></label>
+          <label class="archive-label" hidden><select id="monthly-archive" aria-label="Monthly archive"></select></label>
+          <button id="monthly-info" class="competition-info reel-control-speed" type="button" aria-label="Monthly competition details" hidden>Info</button>
           <span id="reel-description" class="reel-description"></span>
           <button id="sc-play" class="reel-control-play" type="button" aria-label="Pause" title="Pause">&#x23F8;</button>
           <button id="sc-speed" class="reel-control-speed" type="button" title="Speed 1x">1x</button>
@@ -224,14 +232,18 @@
         <div class="reel-track"><canvas id="showcase-canvas"></canvas><div id="sc-loading" class="reel-loading" role="status"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 8h8v14H8zM10 4h4v4h-4zM17 3h1.5v1.5H17zM19.5 1.5H21V3h-1.5zM19.5 5H21v1.5h-1.5z"/></svg><span>LOADING</span></div></div>
       </section>
       <section id="solo-entry" aria-label="Start painting">
+        <button id="competitions-start" type="button"><strong>BATTLES</strong><span>Weekly Wildstyle &amp; monthly themes</span></button>
         <button id="paint-start" type="button">
-          <strong>PAINT</strong>
-          <span>Click here to start painting</span>
+          <strong>JUST PAINT</strong>
+          <span>Paint for fun</span>
         </button>
       </section>
       <section id="subway-frame" class="reel" aria-label="The Subway Line">
         <div class="reel-head">
           <span id="subway-title" class="reel-title">THE SUBWAY LINE</span>
+          <label class="feed-label">Show <select id="sub-feed" aria-label="Show subway artwork" title="The Yard is the public feed, newest first by default. Battle choices show only this week's or this month's entries."><option value="all">The Yard</option><option value="weekly">This Week's Battle</option><option value="monthly">This Month's Battle</option><option value="ads">Ads Only</option></select></label>
+          <label class="archive-label" hidden><select id="weekly-archive" aria-label="Weekly archive"></select></label>
+          <button id="weekly-info" class="competition-info reel-control-speed" type="button" aria-label="Weekly competition details" hidden>Info</button>
           <span id="sub-description" class="reel-description"></span>
           <button id="sub-play" class="reel-control-play" type="button" aria-label="Pause" title="Pause">&#x23F8;</button>
           <button id="sub-speed" class="reel-control-speed" type="button" title="Speed 1x">1x</button>
@@ -248,11 +260,38 @@
         <button id="tos-open" type="button">Terms of Service</button>
       </footer>
     </div>
+    <dialog id="competition-details" aria-labelledby="competition-details-title">
+      <h2 id="competition-details-title"></h2>
+      <p id="competition-details-description"></p>
+      <p id="competition-details-summary"></p>
+      <p>Most votes wins. Competition votes are positive-only. One entry per account, up to 1,000 entries per competition.</p>
+      <form method="dialog"><button type="submit">Close</button></form>
+    </dialog>
+    <dialog id="competition-chooser" aria-labelledby="competition-chooser-title">
+      <h2 id="competition-chooser-title">Paint a Competition Entry</h2>
+      <p>One original entry per account per competition. Maximum 1,000 entries per competition. Entries lock when submitted.</p>
+      <button id="enter-monthly" type="button"></button>
+      <button id="enter-weekly" type="button"></button>
+      <label>Paint on <select id="competition-surface"><option value="train">Train</option><option value="subway">Subway</option></select></label>
+      <p id="competition-choice-message" role="status"></p>
+      <button id="competition-cancel" type="button">Cancel</button>
+    </dialog>
+    <dialog id="competition-confirm" aria-labelledby="competition-confirm-title">
+      <h2 id="competition-confirm-title">Submit Competition Entry?</h2>
+      <canvas id="competition-confirm-preview" width="800" height="240"></canvas>
+      <p id="competition-confirm-text"></p>
+      <p>Your submitted artwork is locked. Voting ends at the published deadline. Reports and moderation still apply.</p>
+      <p id="competition-submit-error" role="alert"></p>
+      <button id="competition-submit-confirm" type="button">Confirm Entry</button>
+      <button id="competition-submit-cancel" type="button">Keep Painting</button>
+    </dialog>
     <dialog id="tos-dialog" aria-labelledby="tos-title">
       <h2 id="tos-title">Terms of Service</h2>
       <ul>
         <li><b>As-is, for fun.</b> GraffBap is provided as-is for artistic, recreational, and entertainment leisure.</li>
         <li><b>Your work stays yours.</b> You keep ownership of your creations, and you agree not to upload or generate abusive, harassing, or unlawful content.</li>
+        <li><b>Sharing and promotion.</b> By publishing artwork or submitting a battle entry, you grant GraffBap (Graph Bap) a non-exclusive, worldwide, royalty-free license to host, reproduce, publicly display, and share that artwork on the site and in Graph Bap promotional materials, including social media. We may resize or crop it for those uses. You keep ownership; this permission does not apply to unpublished private drafts.</li>
+        <li><b>Battles.</b> Published deadlines, entry limits, voting rules, and moderation apply to battle entries; submitted artwork is locked, and results may be corrected after moderation.</li>
         <li><b>No guarantees.</b> We don't guarantee persistent storage or uptime. Cars and sessions may be modified or archived according to yard gameplay mechanics.</li>
       </ul>
       <button id="tos-close" class="cta" type="button">Close</button>
@@ -262,9 +301,10 @@
       <ul>
         <li>Use the Train and Subway controls to change what you see.</li>
         <li>Tap or click a car to rate it, get a closer look, or report it.</li>
-        <li>Tap the Paint button to paint your own car.</li>
+        <li>Tap Just Paint to paint a car for fun.</li>
+        <li>Tap Battles to enter weekly or monthly art battles and vote for your favorites.</li>
       </ul>
-      <p class="welcome-account-note">Sign in with BoxBap.com to save and edit your creations with your account. Anonymous painting is always welcome.</p>
+      <p class="welcome-account-note">Paint without an account, or sign in with BoxBap.com to enter battles and vote.</p>
       <button id="welcome-close" class="cta" type="button">Got it</button>
     </dialog>
     <div id="car-card" hidden>
@@ -279,6 +319,10 @@
       <div class="cc-by"></div>
       <div class="cc-approval"></div>
       <div class="cc-tally" aria-live="polite"><span id="cc-props-count">0</span> props · <span id="cc-toy-count">0</span> whack</div>
+      <div id="cc-competition" hidden>
+        <p id="cc-competition-status"></p>
+        <button id="cc-competition-vote" type="button">Vote for This Entry</button>
+      </div>
       <div class="cc-actions">
         <button id="cc-props" type="button" aria-label="Give props" title="Give Props">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M7 22V10l4.2-6.4a1.8 1.8 0 0 1 3.2 1.4L13.6 9h4.8a2 2 0 0 1 2 2.4l-1.4 6.6a3 3 0 0 1-2.9 2.3H7z"/><rect x="2.5" y="10" width="4.5" height="12" rx="1"/></svg>

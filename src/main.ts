@@ -41,6 +41,11 @@ import {
 import { reportArtwork } from './report-dialog';
 import { actionError } from './services/protected-actions';
 import { PromoService, type PromoAd } from './services/promoService';
+import {
+  competitionDeadline, competitionOpen, competitionPager, hasCompetitionEntry, pastCompetitions, submitCompetition,
+  voteCompetition, watchCompetitions, watchCompetitionEntries, watchRankedCompetitionAvailability, type Competition,
+} from './services/competitions';
+import { localEmulators } from './services/local-environment';
 
 const promoService = new PromoService();
 let globalCarsSpawned = 0;
@@ -668,6 +673,12 @@ const YARDS: Record<YardId, YardDef> = {
 };
 const surfaceFor = (division: string): YardId => (division === 'subway' ? 'subway' : 'train');
 const yardConsists = Object.fromEntries(Object.keys(YARDS).map((id) => [id, makeConsist()])) as Record<YardId, Car[]>;
+let paintingCompetition: Competition | null = null;
+let competitionPainterUid: string | null = null;
+let normalEditor: {
+  train: Car[]; subway: Car[]; yard: YardId; index: number;
+  pieceId: string | null; basedOn: { id: string; writer: string } | null;
+} | null = null;
 
 // Survives a reload so refreshing inside a surface keeps the same surface and practice flag.
 const SESSION_KEY = 'graffbap_session';
@@ -3167,7 +3178,8 @@ function blobToDataUrl(blob: Blob): Promise<string> {
   });
 }
 
-const localKey = (yard: YardId, index: number) => `${yard}/${index}`;
+const localKey = (yard: YardId, index: number) =>
+  paintingCompetition ? `competition/${competitionPainterUid}/${paintingCompetition.id}/${yard}/${index}` : `${yard}/${index}`;
 const pieceKey = (id: string) => `piece/${id}`;
 
 // Firestore caps a document at 1 MiB; leave room for the other fields.
@@ -3213,6 +3225,23 @@ function scheduleRetry(): void {
 // Always saves locally (lossless PNG), then uploads the piece.
 function saveNow(body: HTMLCanvasElement = copyBody()): void {
   savePending = false;
+  if (paintingCompetition) {
+    const key = localKey(currentYard, currentCarIndex);
+    saveStatus.textContent = 'Saving competition draft...';
+    saveChain = saveChain.then(async () => {
+      try {
+        const blob = await new Promise<Blob | null>(resolve => body.toBlob(resolve, 'image/png'));
+        if (!blob) throw new Error('Competition draft encoding failed.');
+        await saveLocalCar(key, blob);
+        saveStatus.textContent = 'Draft saved on this device - not submitted';
+      } catch (error) {
+        console.error('Competition draft save failed', error);
+        saveStatus.textContent = 'Draft save failed';
+        showToast(actionError(error), 6000);
+      }
+    });
+    return;
+  }
   if (practiceMode) {
     saveStatus.textContent = 'Practice · not saved';
     return;
@@ -4225,10 +4254,25 @@ function renderCard(e: RollEntry): void {
   ccReportBtn.disabled = !painted || !(e.isPromo ? e.id : e.reg) || reported;
   ccReportBtn.title = !e.reg && !e.isPromo ? 'Only published community artwork can be reported' :
     reported ? 'Already reported' : 'Report this car to moderators - no account required';
-  ccPaintBtn.hidden = !mine;
+  ccPaintBtn.hidden = !mine || !!e.reg?.competitionId;
   if (mine) renderPaintBtn();
   ccPropsCount.textContent = String(entryProps(e, meta));
   renderRating(e, cardRatingUI);
+  const competition = competitions.find(item => item.id === e.reg?.competitionId);
+  const competitionPanel = document.getElementById('cc-competition')!;
+  competitionPanel.hidden = !e.reg?.competitionId;
+  ccTally.hidden = !!e.reg?.competitionId;
+  ccPropsBtn.hidden = ccToyBtn.hidden = !!e.reg?.competitionId;
+  if (e.reg?.competitionId) {
+    const open = !!competition && competitionOpen(competition);
+    document.getElementById('cc-competition-status')!.textContent =
+      `${competition?.title ?? 'Competition'} · ${e.reg.competitionVotes ?? 0} votes · ${open ? 'Voting open' : competition?.status === 'open' ? 'Results pending' : 'Voting closed'}`;
+    const button = document.getElementById('cc-competition-vote') as HTMLButtonElement;
+    const voted = !!currentUser && localStorage.getItem(`competition-vote/${currentUser.uid}/${e.reg.id}`) === 'yes';
+    const viewingPast = competitionView && archivesView;
+    button.textContent = mine ? 'Your Entry' : voted ? 'Voted' : open ? viewingPast ? 'View Current to Vote' : 'Vote for This Entry' : 'Voting Closed';
+    button.disabled = !open || viewingPast || mine || voted || competitionVoteBusy === e.reg.id;
+  }
   if (e.reg?.basedOnWriter) ccBy.textContent = `${ccBy.textContent} · over ${e.reg.basedOnWriter}`;
   const n = reelLength(cardSrc);
   ccCount.textContent = n ? `${cardCar + 1} / ${n}` : '';
@@ -4288,7 +4332,7 @@ function positionCarCard(): void {
   if (!track) return;
   const bounds = track.getBoundingClientRect();
   carCard.style.left = `${bounds.right}px`;
-  carCard.style.top = `${bounds.top}px`;
+  carCard.style.top = `${Math.max(12, Math.min(bounds.top, innerHeight - carCard.offsetHeight - 12))}px`;
 }
 
 // Closing the card hands the reel back to the viewer, rolling.
@@ -4433,6 +4477,11 @@ function myVote(key: string): VoteKind | null {
 }
 
 function renderRating(e: RollEntry, ui: RatingUI): void {
+  ui.propsBtn.hidden = ui.toyBtn.hidden = !!e.reg?.competitionId;
+  if (e.reg?.competitionId) {
+    ui.approval.textContent = `${e.reg.competitionVotes ?? 0} competition votes - vote in the car detail panel`;
+    return;
+  }
   const key = entryKey(e);
   const meta = readMeta();
   const p = entryProps(e, meta);
@@ -4448,6 +4497,10 @@ function renderRating(e: RollEntry, ui: RatingUI): void {
 
 // One vote per BoxBap.com profile per car (props OR toy); switching moves the vote. Recorded on this device.
 function castVote(e: RollEntry, kind: VoteKind, done: () => void): void {
+  if (e.reg?.competitionId) {
+    showToast('Use the competition vote button. Competition entries have no downvotes.');
+    return;
+  }
   if (!currentUser || currentUser.isAnonymous) {
     requireAuth(() => castVote(e, kind, done), true);
     return;
@@ -4651,7 +4704,8 @@ async function resumeOrStartPainting(): Promise<void> {
 }
 document.getElementById('paint-start')!.addEventListener('click', (e) => {
   (e.currentTarget as HTMLElement).blur();
-  void resumeOrStartPainting();
+  if (competitionView) void chooseCompetition();
+  else void resumeOrStartPainting();
 });
 document.getElementById('new-car')!.addEventListener('click', (e) => {
   (e.currentTarget as HTMLElement).blur();
@@ -4768,6 +4822,9 @@ function assignFeedCars(load: (count: number) => Promise<RollEntry[]>, count: nu
 }
 
 function nextPromoFeedPage(pager: FeedPager, count: number, subway: boolean): Promise<RollEntry[]> {
+  if (competitionView || feedSelection[subway ? 'sub' : 'top'] !== 'all') {
+    return pager.next(count).then(regEntries);
+  }
   return assignFeedCars(async n => regEntries(await withRetry(() => pager.next(n))), count, subway);
 }
 
@@ -4777,6 +4834,8 @@ function promoPresetEntries(subway: boolean): Promise<RollEntry[]> {
 }
 
 async function buildMainline(): Promise<{ entries: RollEntry[]; pager: FeedPager | null }> {
+  const selected = await specialFeed('top');
+  if (selected) return { entries: selected, pager: specialPagers.top ?? null };
   if (myWork.top) {
     const uid = currentUser?.uid;
     if (!uid) return { entries: [], pager: null };
@@ -4880,8 +4939,9 @@ function maybeGrowTop(): void {
   const r = roll;
   const pager = topPager;
   if (!r?.showcase || !r.entries || !pager || pager.done || topGrowing) return;
-  if (r.entries.length >= LINE_MAX || r.x > GROW_AHEAD) return;
-  void loadNextTopBatch(Math.min(LINE_BATCH, LINE_MAX - r.entries.length));
+  const maximum = r.entries.some(entry => entry.reg?.competitionId) ? 1000 : LINE_MAX;
+  if (r.entries.length >= maximum || r.x > GROW_AHEAD) return;
+  void loadNextTopBatch(Math.min(LINE_BATCH, maximum - r.entries.length));
 }
 
 function setReelLoading(id: ReelId, on: boolean): void {
@@ -4897,12 +4957,14 @@ async function startMainline(): Promise<void> {
   reelDescription.textContent = '';
   setReelLoading('top', true);
   startReel([], title, false);
+  renderCompetitionHeadings();
   const { entries, pager } = await buildMainline();
   if (token !== mainlineToken || !roll?.showcase) return;
   setReelLoading('top', false);
   reelDescription.textContent = entries.length || !myWork.top ? '' : "You haven't painted any trains yet.";
   startReel(entries, title, false);
   topPager = pager;
+  renderCompetitionHeadings();
 }
 
 reelBackBtn.addEventListener('click', () => void startMainline());
@@ -4917,7 +4979,7 @@ document.addEventListener('visibilitychange', () => {
 });
 document.getElementById('back-dispatch')!.addEventListener('click', () => {
   flushActiveCar();
-  location.hash = '#gallery';
+  location.hash = paintingCompetition ? '#competitions' : '#gallery';
 });
 
 const tosDialog = document.getElementById('tos-dialog') as HTMLDialogElement;
@@ -5379,6 +5441,17 @@ function applyRoute(): void {
   const gallery = location.hash !== '#yard';
   if (gallery) {
     flushActiveCar();
+    if (paintingCompetition) restoreNormalEditor();
+    const nextCompetitionView = location.hash === '#competitions';
+    if (competitionView !== nextCompetitionView) {
+      competitionView = nextCompetitionView;
+      archivesView = false;
+      myWork.top = myWork.sub = false;
+      renderMyWorkBtn('top');
+      renderMyWorkBtn('sub');
+      if (roll?.showcase) void startMainline();
+    }
+    renderCompetitionChrome();
     if (practiceMode) {
       practiceMode = false;
       wipePracticeYards();
@@ -5406,12 +5479,21 @@ function applyRoute(): void {
       pendingPiece = null;
       pendingFresh = false;
       void loadPieceIntoEditor(reg, edit);
+    } else if (paintingCompetition) {
+      pendingFresh = false;
+      const draftCompetition = paintingCompetition.id;
+      void fetchLocal(currentYard, currentCarIndex).then(() => {
+        if (paintingCompetition?.id !== draftCompetition) return;
+        saveStatus.textContent = car().hasPaint ? 'Competition draft restored - not submitted' : 'Competition draft - not submitted';
+        if (car().localState === 'none') showToast('Could not restore the competition draft. Keep this tab open and try again.', 6000);
+      });
     } else if (pendingFresh) {
       pendingFresh = false;
       startFreshCar();
     }
   }
   practiceNote.hidden = gallery || !practiceMode;
+  renderCompetitionPainting();
 }
 
 // Blank steel on a randomly picked body, writing to a brand-new piece.
@@ -5511,6 +5593,8 @@ let subGeom = { W: 1, scale: 1, trainW: 1 };
 
 // Public subway archives, with community presets standing in until real cars land.
 async function buildSubwayLine(): Promise<{ entries: RollEntry[]; pager: FeedPager | null }> {
+  const selected = await specialFeed('sub');
+  if (selected) return { entries: selected, pager: specialPagers.sub ?? null };
   const pager = feedPager('subway', subSort);
   try {
     const live = await nextPromoFeedPage(pager, LINE_FIRST, true);
@@ -5578,9 +5662,10 @@ function loadNextSubBatch(n = LINE_BATCH): Promise<number> {
 // Subway rolls right-to-left with index 0 leading, so each batch couples on behind the tail.
 function maybeGrowSub(W: number, scale: number): void {
   const pager = subPager;
-  if (!pager || pager.done || subGrowing || subwayReel.entries.length >= LINE_MAX) return;
+  const maximum = subwayReel.entries.some(entry => entry.reg?.competitionId) ? 1000 : LINE_MAX;
+  if (!pager || pager.done || subGrowing || subwayReel.entries.length >= maximum) return;
   if (subwayReel.sx + subwayReel.entries.length * CAR_WIDTH * scale > W + GROW_AHEAD * scale) return;
-  void loadNextSubBatch(Math.min(LINE_BATCH, LINE_MAX - subwayReel.entries.length));
+  void loadNextSubBatch(Math.min(LINE_BATCH, maximum - subwayReel.entries.length));
 }
 
 function loadSubwayLine(yard: YardId | null): void {
@@ -5597,6 +5682,7 @@ function loadSubwayLine(yard: YardId | null): void {
   subGrowing = false;
   subGrowth = null;
   subwayTitle.textContent = myWork.sub ? 'My Subways' : 'Subway';
+  renderCompetitionHeadings();
   setReelLoading('sub', true);
   void (myWork.sub ? buildMySubwayLine() : buildSubwayLine()).then(async ({ entries, pager }) => {
     // Hold the first cars back until their art is decoded so they don't roll in blank.
@@ -5609,6 +5695,7 @@ function loadSubwayLine(yard: YardId | null): void {
     subwayReel.sx = Number.NaN;
     resetReelSel('sub');
     subPager = pager;
+    renderCompetitionHeadings();
   });
 }
 function renderSubControls(): void {
@@ -5985,6 +6072,12 @@ const authEmail = document.getElementById('auth-email') as HTMLInputElement;
 const authPassword = document.getElementById('auth-password') as HTMLInputElement;
 const authName = document.getElementById('auth-name') as HTMLInputElement;
 const authError = document.getElementById('auth-error')!;
+if (localEmulators) {
+  authForm.querySelector('.auth-intro')!.textContent =
+    'Local test site only. Your real BoxBap login will not work here. Test email: voter@example.test. Password: LocalTest123! (filled in below). You can also create a local test profile.';
+  authEmail.value = 'voter@example.test';
+  authPassword.value = 'LocalTest123!';
+}
 
 const AUTH_ERRORS: Record<string, string> = {
   'auth/invalid-email': 'Invalid email address.',
@@ -6035,6 +6128,7 @@ function setAuthMode(next: AuthMode): void {
   const register = next === 'register';
   authForm.dataset.mode = next;
   authForm.querySelectorAll<HTMLElement>('[data-mode]').forEach((el) => (el.hidden = el.dataset.mode !== next));
+  if (localEmulators) (authForm.querySelector('.auth-social') as HTMLElement).hidden = true;
   // Hidden + disabled keeps the alias out of native validation while signing in.
   authName.disabled = !register;
   authName.required = register;
@@ -6080,6 +6174,10 @@ function savePiece(): void {
 
 document.getElementById('save-car')!.addEventListener('click', (e) => {
   (e.currentTarget as HTMLElement).blur();
+  if (paintingCompetition) {
+    if (!signedIn()) return requireAuth(() => confirmCompetitionEntry(), true);
+    return confirmCompetitionEntry();
+  }
   if (signedIn()) return savePiece();
   pendingAuthAction = savePiece;
   openPostChoice();
@@ -6274,6 +6372,444 @@ window.addEventListener('resize', resize);
 resize();
 fitCamera();
 updateCursor();
+// Competition mode uses the existing reels and editor, never a second renderer.
+let competitions: Competition[] = [];
+let competitionsLoaded = false;
+let competitionView = false;
+let archivesView = false;
+const selectedArchive: Record<'monthly' | 'weekly', string> = { monthly: '', weekly: '' };
+const rankedAvailable = { monthly: false, weekly: false };
+const feedSelection: Record<ReelId, string> = { top: 'all', sub: 'all' };
+const specialPagers: Partial<Record<ReelId, FeedPager>> = {};
+const competitionTabs = document.getElementById('competition-tabs')!;
+const chooser = document.getElementById('competition-chooser') as HTMLDialogElement;
+const submitDialog = document.getElementById('competition-confirm') as HTMLDialogElement;
+let submitBusy = false;
+let competitionVoteBusy: string | null = null;
+const entrySubscriptions: Partial<Record<ReelId, { id: string; stop: () => void }>> = {};
+
+function watchReelCompetition(id: ReelId, competitionId: string | null): void {
+  if (entrySubscriptions[id]?.id === competitionId) return;
+  entrySubscriptions[id]?.stop();
+  delete entrySubscriptions[id];
+  if (!competitionId) return;
+  let first = true;
+  const stop = watchCompetitionEntries(competitionId, cars => {
+    if (first) { first = false; return; }
+    const entries = id === 'top' ? roll?.entries ?? [] : subwayReel.entries;
+    const changed = cars.filter(car => ['departed', 'hall_of_fame', 'museum'].includes(car.status))
+      .filter(car => competitionView || car.division === (id === 'top' ? 'freight' : 'subway'))
+      .filter(car => competitionView || !myWork[id] || car.writerUid === currentUser?.uid);
+    if (entries.length <= 30 && (changed.length !== entries.length || changed.some(car => !entries.some(entry => entry.reg?.id === car.id)))) {
+      reloadReel(id);
+      return;
+    }
+    for (const entry of entries) {
+      const current = changed.find(car => car.id === entry.reg?.id);
+      if (current) entry.reg = current;
+    }
+    refreshCard();
+    renderCompetitionHeadings();
+  }, error => {
+    console.error('Competition entries subscription failed', error);
+    showToast(actionError(error), 6000);
+  });
+  entrySubscriptions[id] = { id: competitionId, stop };
+}
+
+function currentCompetition(kind: Competition['kind']): Competition | undefined {
+  return competitions.find(item => item.kind === kind && competitionOpen(item));
+}
+
+function allTimeCompetitionFeed(id: ReelId): boolean {
+  return competitionView && archivesView && selectedArchive[id === 'top' ? 'monthly' : 'weekly'] === 'all-time';
+}
+
+function selectedCompetition(id: ReelId): Competition | undefined {
+  const kind = competitionView ? id === 'top' ? 'monthly' : 'weekly' : feedSelection[id];
+  if (kind !== 'monthly' && kind !== 'weekly') return undefined;
+  return competitionView && archivesView
+    ? competitions.find(item => item.id === selectedArchive[kind])
+    : currentCompetition(kind) ?? (competitionView
+      ? competitions.find(item => item.kind === kind && item.opensAt <= Date.now()) : undefined);
+}
+
+function competitionSummary(competition: Competition): string {
+  const closed = Date.now() >= competition.closesAt;
+  const seconds = Math.max(0, Math.ceil((competition.closesAt - Date.now()) / 1000));
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor(seconds % 86400 / 3600);
+  const minutes = Math.floor(seconds % 3600 / 60);
+  return `${competition.entryCount ?? 0}/${competition.maxEntries ?? 1000} entries · ${closed ? competition.status === 'open' ? 'Closed - results pending' : 'Closed - final results' : `${days}d ${hours}h ${minutes}m left`}`;
+}
+
+function renderCompetitionHeadings(): void {
+  for (const id of ['top', 'sub'] as const) {
+    const competition = selectedCompetition(id);
+    const title = id === 'top' ? reelTitle : subwayTitle;
+    const description = id === 'top' ? reelDescription : subDescription;
+    document.getElementById(id === 'top' ? 'showcase-frame' : 'subway-frame')!.setAttribute('aria-label',
+      competitionView ? `${id === 'top' ? 'Monthly competition' : 'Weekly Wildstyle'}${archivesView ? ' archive' : ''}` :
+        id === 'top' ? 'The Mainline' : 'The Subway Line');
+    if (allTimeCompetitionFeed(id)) {
+      title.textContent = `ALL-TIME ${id === 'top' ? 'MONTHLY' : 'WEEKLY'} · TOP 500`;
+      description.textContent = 'Highest competition votes · all dates';
+    } else if (competition) {
+      const archiveDate = archivesView && competitionView ? new Date(competition.opensAt).toLocaleDateString(undefined, {
+        timeZone: 'America/Chicago', month: 'short', year: 'numeric', ...(competition.kind === 'weekly' ? { day: 'numeric' } : {}),
+      }) : '';
+      title.textContent = `${competition.kind === 'monthly' ? 'MONTHLY' : 'WEEKLY'}${archivesView && competitionView ? ` ARCHIVE · ${archiveDate}` : ''} · ${competition.title}`;
+      const entries = id === 'top' ? roll?.entries ?? [] : subwayReel.entries;
+      const winner = entries.find(entry => entry.reg?.id === competition.winnerId);
+      description.textContent = competitionSummary(competition) +
+        (competition.winnerId ? ` · Winner: ${winner?.writer ?? 'Loading winner'} (${winner?.reg?.competitionVotes ?? 0} votes)` :
+          Date.now() >= competition.closesAt && competition.status !== 'open' ? ' · No winner' : '') +
+        (!entries.length ? ' · No entries yet' : '');
+      description.title = `${competition.description} · ${competitionDeadline(competition)}`;
+      title.title = competition.title;
+    } else if (competitionView || feedSelection[id] !== 'all') {
+      title.textContent = competitionView
+        ? `${id === 'top' ? 'MONTHLY' : 'WEEKLY'}${archivesView ? ' · No past battles yet' : ' BATTLE'}`
+        : feedSelection[id] === 'ads' ? 'ADS ONLY' : `${feedSelection[id].toUpperCase()} COMPETITION`;
+      description.textContent = feedSelection[id] === 'ads' && !competitionView
+        ? 'Active promos - click a car to visit its link.'
+        : archivesView && competitionView ? 'No past battles yet.' : 'No competition is currently open.';
+    }
+  }
+}
+
+function renderCompetitionChrome(): void {
+  document.body.classList.toggle('competitions', competitionView);
+  competitionTabs.hidden = !competitionView;
+  const viewToggle = document.getElementById('competition-view-toggle')!;
+  const viewing = archivesView ? 'Past' : 'Current';
+  const otherView = archivesView ? 'Current' : 'Past';
+  viewToggle.querySelector('strong')!.textContent = `Viewing: ${viewing}`;
+  viewToggle.querySelector('span')!.textContent = `Click to view ${otherView}`;
+  viewToggle.setAttribute('aria-label', `Viewing ${viewing} competitions. Click to view ${otherView} competitions.`);
+  const left = document.getElementById('competitions-start')!;
+  left.querySelector('strong')!.textContent = competitionView ? 'BACK TO YARD' : 'BATTLES';
+  left.querySelector('span')!.textContent = competitionView ? 'Return to normal browsing' : 'Weekly Wildstyle & monthly themes';
+  const right = document.getElementById('paint-start')!;
+  right.hidden = competitionView && archivesView;
+  right.querySelector('strong')!.textContent = competitionView ? 'DO BATTLE' : 'JUST PAINT';
+  right.querySelector('span')!.textContent = competitionView ? 'Paint an entry' : 'Paint for fun';
+  document.querySelectorAll<HTMLElement>('.feed-label').forEach(label => label.hidden = competitionView);
+  for (const id of ['top', 'sub'] as const) {
+    myWorkBtns[id].hidden = competitionView || feedSelection[id] === 'ads';
+    const sort = document.getElementById(id === 'top' ? 'sc-sort' : 'sub-sort') as HTMLSelectElement;
+    sort.disabled = competitionView || feedSelection[id] !== 'all';
+    const header = sort.closest('.reel-head')!;
+    const archiveSelect = document.getElementById(`${id === 'top' ? 'monthly' : 'weekly'}-archive`) as HTMLSelectElement;
+    const showArchiveSelect = competitionView && archivesView && archiveSelect.options.length > 1;
+    (header.querySelector('.archive-label') as HTMLElement).hidden = !showArchiveSelect;
+    const competitionFeed = allTimeCompetitionFeed(id) || !!selectedCompetition(id);
+    (header.querySelector('.competition-info') as HTMLElement).hidden = !competitionFeed;
+    header.classList.toggle('has-archive', showArchiveSelect);
+    sort.hidden = sort.disabled;
+    (header.querySelector('.reel-sort-label') as HTMLElement).hidden = sort.disabled;
+    sort.title = sort.disabled ? 'Competition entries are ordered by competition votes.' : 'Sort artwork';
+  }
+  renderCompetitionHeadings();
+}
+
+async function specialFeed(id: ReelId): Promise<RollEntry[] | null> {
+  delete specialPagers[id];
+  watchReelCompetition(id, selectedCompetition(id)?.id ?? null);
+  if (!competitionView && feedSelection[id] === 'all') return null;
+  try {
+    if (!competitionView && feedSelection[id] === 'ads') {
+      await promoReady;
+      return promoService.getActiveAds().map(ad => ({
+        yard: 'preset', index: 0, writer: 'OFFICIAL PROMO', props: ad.props ?? 0,
+        sub: id === 'sub', id: ad.id, isPromo: true, promoAd: ad,
+        promoLink: ad.linkUrl, promoImage: ad.imageUrl,
+      }));
+    }
+    const competition = selectedCompetition(id);
+    if (!competition && !allTimeCompetitionFeed(id)) return [];
+    const pager = competitionPager(allTimeCompetitionFeed(id) ? null : competition!.id,
+      competitionView ? undefined : id === 'top' ? 'freight' : 'subway',
+      !competitionView && myWork[id] ? currentUser?.uid : undefined,
+      allTimeCompetitionFeed(id) ? id === 'top' ? 'monthly' : 'weekly' : undefined);
+    specialPagers[id] = pager;
+    return regEntries(await pager.next(30));
+  } catch (error) {
+    console.error('Competition feed failed', error);
+    document.getElementById('competition-message')!.textContent = actionError(error);
+    showToast(actionError(error), 6000);
+    return [];
+  }
+}
+
+function reloadCompetitionReels(): void {
+  renderCompetitionChrome();
+  void startMainline();
+  loadSubwayLine(null);
+}
+
+document.getElementById('competitions-start')!.addEventListener('click', () => {
+  location.hash = competitionView ? '#gallery' : '#competitions';
+});
+document.getElementById('competition-view-toggle')!.addEventListener('click', () => {
+  archivesView = !archivesView;
+  reloadCompetitionReels();
+});
+for (const id of ['top', 'sub'] as const) {
+  (document.getElementById(id === 'top' ? 'top-feed' : 'sub-feed') as HTMLSelectElement).addEventListener('change', event => {
+    feedSelection[id] = (event.target as HTMLSelectElement).value;
+    myWork[id] = false;
+    renderMyWorkBtn(id);
+    renderCompetitionChrome();
+    reloadReel(id);
+  });
+}
+for (const kind of ['monthly', 'weekly'] as const) {
+  const select = document.getElementById(`${kind}-archive`) as HTMLSelectElement;
+  select.addEventListener('change', () => {
+    selectedArchive[kind] = select.value;
+    reloadCompetitionReels();
+  });
+  document.getElementById(`${kind}-info`)!.addEventListener('click', () => {
+    const id = kind === 'monthly' ? 'top' : 'sub';
+    const competition = selectedCompetition(id);
+    const allTime = allTimeCompetitionFeed(id);
+    document.getElementById('competition-details-title')!.textContent = allTime
+      ? `All-Time ${kind === 'monthly' ? 'Monthly' : 'Weekly'} · Top 500` : competition?.title ?? 'Competition';
+    document.getElementById('competition-details-description')!.textContent = allTime
+      ? `The highest-voted ${kind} competition entries across all dates, ranked by competition votes. Entries with no votes are not included.`
+      : competition?.description ?? 'No competition is currently open.';
+    document.getElementById('competition-details-summary')!.textContent = competition && !allTime
+      ? `${competitionSummary(competition)} · Deadline: ${competitionDeadline(competition)}`
+      : 'Select a car to see its votes and competition. Archived entries cannot receive new votes.';
+    (document.getElementById('competition-details') as HTMLDialogElement).showModal();
+  });
+}
+
+function updateArchiveChoices(): void {
+  if (!competitionsLoaded) return;
+  for (const kind of ['monthly', 'weekly'] as const) {
+    const select = document.getElementById(`${kind}-archive`) as HTMLSelectElement;
+    const archived = pastCompetitions(competitions, kind);
+    select.replaceChildren(...(rankedAvailable[kind]
+      ? [new Option(`All-Time ${kind === 'monthly' ? 'Monthly' : 'Weekly'} · Top 500`, 'all-time')] : []), ...archived.map(item => {
+      const label = `${new Date(item.opensAt).toLocaleDateString(undefined, {
+        timeZone: 'America/Chicago', year: 'numeric', month: 'short', day: 'numeric',
+      })} - ${item.title}`;
+      return new Option(label, item.id);
+    }));
+    if (!(selectedArchive[kind] === 'all-time' && rankedAvailable[kind]) && !archived.some(item => item.id === selectedArchive[kind])) {
+      selectedArchive[kind] = archived[0]?.id ?? (rankedAvailable[kind] ? 'all-time' : '');
+    }
+    select.value = selectedArchive[kind];
+  }
+}
+
+for (const kind of ['monthly', 'weekly'] as const) {
+  watchRankedCompetitionAvailability(kind, available => {
+    if (rankedAvailable[kind] === available) return;
+    rankedAvailable[kind] = available;
+    updateArchiveChoices();
+    if (competitionView && archivesView) reloadCompetitionReels();
+  }, error => {
+    console.error('All-time competition availability failed', error);
+    document.getElementById('competition-message')!.textContent = `Past battles unavailable: ${actionError(error)}`;
+  });
+}
+
+watchCompetitions(items => {
+  competitions = items;
+  competitionsLoaded = true;
+  updateArchiveChoices();
+  if (competitionView || Object.values(feedSelection).some(value => value !== 'all')) reloadCompetitionReels();
+  refreshCard();
+}, error => {
+  console.error('Competition subscription failed', error);
+  document.getElementById('competition-message')!.textContent = `Competitions unavailable: ${actionError(error)}`;
+});
+
+async function chooseCompetition(): Promise<void> {
+  if (!signedIn()) return requireAuth(() => void chooseCompetition(), true);
+  document.getElementById('competition-choice-message')!.textContent = '';
+  chooser.showModal();
+  for (const kind of ['monthly', 'weekly'] as const) {
+    const competition = currentCompetition(kind);
+    const button = document.getElementById(`enter-${kind}`) as HTMLButtonElement;
+    button.textContent = competition ? `${kind === 'monthly' ? 'Monthly' : 'Weekly'}: ${competition.title}` : `No current ${kind} competition`;
+    button.disabled = true;
+    try {
+      const entered = competition && await hasCompetitionEntry(competition.id, currentUser!.uid);
+      const full = !!competition && (competition.entryCount ?? 0) >= (competition.maxEntries ?? 1000);
+      button.disabled = !competition || !!entered || competition.submissionEnabled === false || full;
+      if (entered) button.textContent += ' - Already entered';
+      else if (full) button.textContent += ' - Full (1,000 entries)';
+      else if (competition && button.disabled) button.textContent += ' - Logo submissions not yet available';
+    } catch (error) {
+      console.error('Competition eligibility check failed', error);
+      document.getElementById('competition-choice-message')!.textContent = actionError(error);
+    }
+  }
+}
+
+async function beginCompetition(kind: Competition['kind']): Promise<void> {
+  const competition = currentCompetition(kind);
+  if (!competition || !signedIn()) return;
+  chooser.close();
+  flushActiveCar();
+  await saveChain;
+  leaveCar();
+  await saveChain;
+  normalEditor = {
+    train: yardConsists.train, subway: yardConsists.subway, yard: currentYard, index: currentCarIndex,
+    pieceId: currentPieceId, basedOn: pieceBasedOn,
+  };
+  paintingCompetition = competition;
+  competitionPainterUid = currentUser!.uid;
+  sessionStorage.setItem('graffbap_competition_editor', competition.id);
+  yardConsists.train = makeConsist();
+  yardConsists.subway = makeConsist();
+  const surface = (document.getElementById('competition-surface') as HTMLSelectElement).value;
+  currentYard = surface === 'subway' ? 'subway' : 'train';
+  consist = yardConsists[currentYard];
+  currentCarIndex = 0;
+  resetPieceSession();
+  pendingPiece = null;
+  pendingFresh = false;
+  applyCarBase(baseIdFor(currentYard, 0));
+  paintCtx.clearRect(0, 0, CAR_WIDTH, CAR_HEIGHT);
+  sketchCtx.clearRect(0, 0, CAR_WIDTH, CAR_HEIGHT);
+  sketchHas = false;
+  ++swapToken;
+  swapPending = false;
+  pendingYard = currentYard;
+  location.hash = '#yard';
+}
+
+function restoreNormalEditor(): void {
+  paintingCompetition = null;
+  competitionPainterUid = null;
+  sessionStorage.removeItem('graffbap_competition_editor');
+  document.body.classList.remove('competition-paint');
+  if (!normalEditor) return;
+  yardConsists.train = normalEditor.train;
+  yardConsists.subway = normalEditor.subway;
+  currentYard = normalEditor.yard;
+  consist = yardConsists[currentYard];
+  currentCarIndex = normalEditor.index;
+  currentPieceId = normalEditor.pieceId;
+  pieceBasedOn = normalEditor.basedOn;
+  normalEditor = null;
+  enterCar();
+}
+
+function renderCompetitionPainting(): void {
+  const banner = document.getElementById('competition-paint-banner')!;
+  banner.hidden = !paintingCompetition || location.hash !== '#yard';
+  document.body.classList.toggle('competition-paint', !banner.hidden);
+  if (paintingCompetition) {
+    banner.textContent = `BATTLE: ${paintingCompetition.title}`;
+    banner.title = `${paintingCompetition.title} - click for theme, deadline and rules`;
+  }
+  document.querySelector('#save-car .bar-label')!.textContent = paintingCompetition ? 'SUBMIT ENTRY' : 'POST';
+  document.getElementById('save-car')!.setAttribute('aria-label', paintingCompetition ? 'Submit competition entry' : 'Post this car to the line');
+}
+
+document.getElementById('competition-paint-banner')!.addEventListener('click', () => {
+  if (!paintingCompetition) return;
+  document.getElementById('competition-details-title')!.textContent = paintingCompetition.title;
+  document.getElementById('competition-details-description')!.textContent = paintingCompetition.description;
+  document.getElementById('competition-details-summary')!.textContent =
+    `${competitionSummary(paintingCompetition)} · Deadline: ${competitionDeadline(paintingCompetition)}`;
+  (document.getElementById('competition-details') as HTMLDialogElement).showModal();
+});
+
+for (const kind of ['monthly', 'weekly'] as const) {
+  document.getElementById(`enter-${kind}`)!.addEventListener('click', () => {
+    void beginCompetition(kind).catch(error => {
+      console.error('Could not start competition painting', error);
+      showToast(actionError(error), 6000);
+    });
+  });
+}
+document.getElementById('competition-cancel')!.addEventListener('click', () => chooser.close());
+
+function confirmCompetitionEntry(): void {
+  if (!paintingCompetition || !car().hasPaint) return showToast('Paint your entry before submitting.');
+  if (!competitionOpen(paintingCompetition)) return showToast('This competition has closed. Your draft stays on this device.');
+  document.getElementById('competition-confirm-text')!.textContent = `${paintingCompetition.title} · closes ${competitionDeadline(paintingCompetition)}`;
+  document.getElementById('competition-submit-error')!.textContent = '';
+  const preview = document.getElementById('competition-confirm-preview') as HTMLCanvasElement;
+  preview.getContext('2d')!.drawImage(paintLayer, 0, 0, preview.width, preview.height);
+  submitDialog.showModal();
+}
+document.getElementById('competition-submit-cancel')!.addEventListener('click', () => submitDialog.close());
+submitDialog.addEventListener('cancel', event => { if (submitBusy) event.preventDefault(); });
+document.getElementById('competition-submit-confirm')!.addEventListener('click', async () => {
+  if (submitBusy || !paintingCompetition) return;
+  submitBusy = true;
+  submitDialog.querySelectorAll<HTMLButtonElement>('button').forEach(button => button.disabled = true);
+  try {
+    if (!currentUser || currentUser.isAnonymous) throw new Error('Sign in before submitting a competition entry.');
+    if (currentUser.uid !== competitionPainterUid) throw new Error('Sign back into the account that started this competition draft.');
+    await submitCompetition(paintingCompetition.id, {
+      yard: currentYard, division: YARDS[currentYard].division, slot: currentCarIndex,
+      writer: writerHandle(currentUser), image: await encodeForUpload(copyBody()), createdAt: Date.now(),
+    });
+    savePending = false;
+    submitDialog.close();
+    showToast('Competition entry submitted! Your artwork is now locked.');
+    location.hash = '#competitions';
+    reloadCompetitionReels();
+  } catch (error) {
+    console.error('Competition submission failed', error);
+    document.getElementById('competition-submit-error')!.textContent = actionError(error);
+  } finally {
+    submitBusy = false;
+    submitDialog.querySelectorAll<HTMLButtonElement>('button').forEach(button => button.disabled = false);
+  }
+});
+
+function castCompetitionVote(): void {
+  const entry = cardEntryAt(cardCar);
+  if (!entry?.reg?.competitionId) return;
+  if (!signedIn()) return requireAuth(castCompetitionVote, true);
+  const id = entry.reg.id;
+  const uid = currentUser!.uid;
+  if (competitionVoteBusy) return;
+  competitionVoteBusy = id;
+  const button = document.getElementById('cc-competition-vote') as HTMLButtonElement;
+  button.disabled = true;
+  void voteCompetition(id).then(result => {
+    for (const item of [...roll?.entries ?? [], ...subwayReel.entries]) {
+      if (item.reg?.id === id) item.reg.competitionVotes = result.votes;
+    }
+    localStorage.setItem(`competition-vote/${uid}/${id}`, 'yes');
+    showToast(result.already ? 'You already voted for this entry.' : 'Competition vote recorded.');
+  }).catch(error => {
+    console.error('Competition vote failed', error);
+    showToast(actionError(error), 6000);
+  }).finally(() => {
+    competitionVoteBusy = null;
+    refreshCard();
+  });
+}
+document.getElementById('cc-competition-vote')!.addEventListener('click', castCompetitionVote);
+window.setInterval(() => {
+  renderCompetitionHeadings();
+  if (cardCar >= 0 && cardEntryAt(cardCar)?.reg?.competitionId) refreshCard();
+}, 1000);
+if (localEmulators) {
+  const label = document.createElement('span');
+  label.textContent = 'LOCAL TEST DATA';
+  label.style.cssText = 'position:fixed;bottom:0;left:0;z-index:100;background:#ffd200;color:#111;padding:4px;font:11px monospace;pointer-events:none';
+  document.body.append(label);
+}
+
+if (location.hash === '#yard' && sessionStorage.getItem('graffbap_competition_editor')) {
+  location.hash = '#competitions';
+  sessionStorage.removeItem('graffbap_competition_editor');
+  showToast('Competition draft kept on this device. Choose Do Battle to resume it.', 6000);
+}
 requestAnimationFrame(render);
 applyRoute();
 document.body.classList.add('ready');

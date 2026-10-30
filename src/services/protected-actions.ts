@@ -1,9 +1,10 @@
 import { initializeAppCheck, ReCaptchaEnterpriseProvider } from 'firebase/app-check';
-import { getFunctions } from 'firebase/functions';
+import { connectFunctionsEmulator, getFunctions } from 'firebase/functions';
 import { firebaseApp } from './firebase';
+import { localEmulators } from './local-environment';
 
 const appCheckKey = import.meta.env.VITE_FIREBASE_APPCHECK_SITE_KEY;
-if (appCheckKey) {
+if (appCheckKey && !localEmulators) {
   initializeAppCheck(firebaseApp, {
     provider: new ReCaptchaEnterpriseProvider(appCheckKey),
     isTokenAutoRefreshEnabled: true,
@@ -11,9 +12,10 @@ if (appCheckKey) {
 }
 
 export const graffitiFunctions = getFunctions(firebaseApp, 'us-central1');
+if (localEmulators) connectFunctionsEmulator(graffitiFunctions, '127.0.0.1', 5001);
 
 export function requireAbuseProtection(): void {
-  if (!appCheckKey) {
+  if (!appCheckKey && !localEmulators) {
     throw new Error('Ratings and reporting verification are not configured. Please contact the site administrator.');
   }
 }

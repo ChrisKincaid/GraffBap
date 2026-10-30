@@ -1,6 +1,7 @@
 import { initializeApp } from 'firebase/app';
 import {
   createUserWithEmailAndPassword,
+  connectAuthEmulator,
   EmailAuthProvider,
   getAuth,
   GithubAuthProvider,
@@ -15,6 +16,7 @@ import {
 } from 'firebase/auth';
 import {
   collection,
+  connectFirestoreEmulator,
   doc,
   getDoc,
   getDocs,
@@ -25,7 +27,8 @@ import {
   type Timestamp,
   type Unsubscribe,
 } from 'firebase/firestore';
-import { getDatabase } from 'firebase/database';
+import { connectDatabaseEmulator, getDatabase } from 'firebase/database';
+import { localEmulators } from './local-environment';
 
 const firebaseConfig = {
   apiKey: 'AIzaSyB_Rgi9EAUpigcL8-f9SaiiEF-bHzHMq38',
@@ -57,12 +60,20 @@ export interface PublicCarData {
   lastWriter: string;
 }
 
-export const firebaseApp = initializeApp(firebaseConfig);
+export const firebaseApp = initializeApp(localEmulators ? {
+  ...firebaseConfig,
+  apiKey: 'demo-graphbap-local-key',
+  projectId: 'demo-graphbap',
+  authDomain: 'demo-graphbap.firebaseapp.com',
+  storageBucket: 'demo-graphbap.appspot.com',
+} : firebaseConfig);
 const app = firebaseApp;
 export const auth = getAuth(app);
+if (localEmulators) connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
 
 const RTDB_URL = import.meta.env.VITE_FIREBASE_RTDB_URL || 'https://boombapboombox-a5b78-default-rtdb.firebaseio.com';
-export const rtdb = getDatabase(app, RTDB_URL);
+export const rtdb = getDatabase(app, localEmulators ? 'https://demo-graphbap-default-rtdb.firebaseio.com' : RTDB_URL);
+if (localEmulators) connectDatabaseEmulator(rtdb, '127.0.0.1', 9000);
 
 // This project has no '(default)' database; the boombapboombox Admin app uses the named 'main' database.
 const FIRESTORE_DATABASE_ID = import.meta.env.VITE_FIREBASE_DATABASE_ID || 'main';
@@ -75,6 +86,7 @@ export const db = (() => {
     throw err;
   }
 })();
+if (localEmulators) connectFirestoreEmulator(db, '127.0.0.1', 8080);
 
 let anonymousSignIn: Promise<User> | null = null;
 
