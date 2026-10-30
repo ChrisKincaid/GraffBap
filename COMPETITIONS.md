@@ -119,6 +119,39 @@ One account may submit once per competition. Each competition has a maximum of
 positive-only, separate from ordinary Props/Toys, with no self-votes.
 Reports reuse the same artwork ID and existing moderation queue.
 
+## Sharing battle entries
+
+Select a battle car and tap **Share Entry**, or share again from its direct view.
+Supported devices open their native share menu with "Check my piece. Drop a vote."
+Other browsers copy the permanent link; if clipboard access is denied, a dialog
+shows a selected, read-only link for manual copying. Cancelling native sharing
+does not copy anything or open a second dialog. Links use the current site's host
+(so local tests never produce production links), strip query parameters, and use
+`/#entry=ARTWORK_ID`.
+
+The direct view fetches that published battle entry by ID, renders its freight
+or subway base with its paint using the existing compositor, and displays live
+vote totals. It does not need to find the car in a random reel or download the
+whole battle. A fresh visitor sees the piece directly, without the welcome modal.
+Other page/editor controls are inert while the shared view is open. Browse Battles
+returns to the existing battle screen; refresh and browser Back retain direct links.
+
+Viewing, sharing and reporting do not require an account. Voting uses the same
+protected `competitionVote` callable and existing sign-in flow, bound to the
+clicked artwork ID through sign-in rather than a passing train's current index.
+Cancelling sign-in does not vote; navigating to a different shared entry while
+signing in cancels the pending shared-entry vote. Owners cannot vote for themselves.
+Closed/archived links still show the piece and totals, but voting is disabled.
+Invalid/missing/hidden entries show an unavailable message. Load errors offer a
+visible retry; live moderation/removal hides an already-open piece.
+
+This feature changes only Graph Bap's frontend. No new Functions, rules, indexes,
+database fields, or voting/report identities are introduced. Ordinary Yard artwork
+and unpublished drafts do not gain share buttons in this battle-entry release.
+No custom per-artwork social preview metadata or server-side thumbnail generator
+is included. Social platforms may show a generic preview or none; an artwork
+thumbnail is not guaranteed by the share link.
+
 Deadlines are Monday 00:00 to next Monday 00:00 for weekly and first-of-month
 00:00 to next first-of-month 00:00 for monthly, all America/Chicago time,
 including daylight saving. Server checks close both submissions and votes even
@@ -138,16 +171,20 @@ artwork, and `npm run dev:local`. They use Microsoft Edge through Playwright.
 Backend date tests inject time to verify rollover without changing the computer
 clock. They include cutoff, DST, archive, eligibility and retry behavior.
 
-The local browser suite passed all fifteen scenarios, including sparse launch,
+The local browser suite covers twenty-four scenarios, including sparse launch,
 separate weekly/monthly all-time rankings, and eight viewport sizes
 checking identical train geometry across Home/Current/Past, no page scrolling,
 and unclipped controls. It mutates demo entries,
 votes, and reports; reseed before a complete rerun and after testing to restore
-the sample showcase. Frontend build and all fourteen competition unit checks pass,
+the sample showcase. Frontend build and all seventeen competition unit checks pass,
 including the all-time pager's exact 500-entry ceiling.
 Mixed-order tests traverse all 1,000 entries at middle/before-first/after-last
 starting points without duplicates or omissions, and live changes update the
 selected car without closing it or restarting its train.
+Sharing checks cover guest entry links, freight/subway composition, mobile,
+refresh/Back, native sharing and denied-clipboard fallback, sign-in/cancel target
+preservation, self-vote/closed-state restrictions, guest reporting, live moderation,
+missing/invalid entries and artwork-load retry.
 Freight and subway submission checks skew the client clock a minute ahead/behind,
 verify server-owned timestamps and paint-only uploads, and check full-car previews.
 

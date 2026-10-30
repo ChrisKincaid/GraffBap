@@ -296,6 +296,32 @@
       </ul>
       <button id="tos-close" class="cta" type="button">Close</button>
     </dialog>
+    <section id="shared-entry" hidden aria-labelledby="shared-entry-title">
+      <div class="shared-entry-card">
+        <header class="shared-entry-header">
+          <strong>GRAPH BAP</strong>
+          <button id="shared-entry-account" type="button">Sign in</button>
+        </header>
+        <h1 id="shared-entry-title" tabindex="-1">Loading piece...</h1>
+        <p id="shared-entry-writer"></p>
+        <canvas id="shared-entry-preview" width="1600" height="408" role="img" aria-label="Battle artwork on its train" hidden></canvas>
+        <p id="shared-entry-status" role="status"></p>
+        <p id="shared-entry-error" role="alert"></p>
+        <div class="shared-entry-actions">
+          <button id="shared-entry-vote" type="button" hidden>Vote for This Entry</button>
+          <button id="shared-entry-share" type="button" hidden>Share Entry</button>
+          <button id="shared-entry-report" type="button" hidden>Report</button>
+          <button id="shared-entry-retry" type="button" hidden>Try again</button>
+          <button id="shared-entry-browse" type="button">Browse Battles</button>
+        </div>
+      </div>
+    </section>
+    <dialog id="entry-share-dialog" aria-labelledby="entry-share-title">
+      <h2 id="entry-share-title">Share your piece</h2>
+      <p>Copy this link and send it to your crew.</p>
+      <input id="entry-share-link" type="url" readonly aria-label="Entry share link" />
+      <button id="entry-share-close" type="button">Done</button>
+    </dialog>
     <dialog id="welcome-dialog" aria-labelledby="welcome-title">
       <h2 id="welcome-title">WELCOME TO GRAFFBAP</h2>
       <ul>
@@ -322,6 +348,7 @@
       <div id="cc-competition" hidden>
         <p id="cc-competition-status"></p>
         <button id="cc-competition-vote" type="button">Vote for This Entry</button>
+        <button id="cc-competition-share" type="button">Share Entry</button>
       </div>
       <div class="cc-actions">
         <button id="cc-props" type="button" aria-label="Give props" title="Give Props">

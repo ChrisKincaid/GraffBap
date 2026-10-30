@@ -329,3 +329,79 @@ test('existing opposing train direction and speed formulas remain unchanged', ()
   assert.ok(source.includes('subwayReel.sx -= ROLL_SPEED * ROLL_SPEEDS[subwayReel.speedIdx]!.rate * scale * dt'));
   assert.ok(source.includes('x: showcase ? (entries?.length ?? CAR_COUNT) * CAR_WIDTH : -L.W / L.scale'));
 });
+
+function sharingModule() {
+  const code = fs.readFileSync(path.join(root, 'src', 'services', 'entry-sharing.ts'), 'utf8');
+  const warnings = [];
+  const context = vm.createContext({ exports: {}, URL, Error, console: { warn: (...args) => warnings.push(args) } });
+  vm.runInContext(ts.transpileModule(code, {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+  }).outputText, context);
+  return { ...context.exports, warnings };
+}
+
+test('entry routes validate permanent IDs and share URLs keep the current host without query data', () => {
+  const sharing = sharingModule();
+  assert.equal(sharing.entryRouteId('#competitions'), null);
+  assert.equal(sharing.entryRouteId('#entry=weekly_123_abc'), 'weekly_123_abc');
+  for (const hash of ['#entry=', '#entry=../../secret', '#entry=<script>', '#entry=' + 'a'.repeat(129)]) {
+    assert.equal(sharing.entryRouteId(hash), '');
+  }
+  assert.equal(sharing.entryShareUrl('weekly_123_abc', 'https://graffbap.boxbap.com/?token=private#competitions'),
+    'https://graffbap.boxbap.com/#entry=weekly_123_abc');
+  assert.equal(sharing.entryShareUrl('test', 'http://127.0.0.1:5174/#gallery'),
+    'http://127.0.0.1:5174/#entry=test');
+  assert.throws(() => sharing.entryShareUrl('../no', 'https://example.test'), /valid share link/);
+});
+
+test('native sharing uses restrained copy, cancellation does not copy, and denied clipboard shows a usable link', async () => {
+  const sharing = sharingModule();
+  const url = 'https://graffbap.boxbap.com/#entry=entry1';
+  let payload;
+  assert.equal(await sharing.shareEntryLink(url, {
+    share: async data => { payload = data; },
+  }, () => assert.fail('Unexpected manual fallback')), 'shared');
+  assert.equal(payload.text, 'Check my piece. Drop a vote.');
+  assert.equal(payload.url, url);
+  const cancelled = new Error('Cancelled');
+  cancelled.name = 'AbortError';
+  assert.equal(await sharing.shareEntryLink(url, {
+    share: async () => { throw cancelled; },
+    clipboard: { writeText: () => assert.fail('Cancellation must not copy a link') },
+  }, () => assert.fail('Cancellation must not open another dialog')), 'cancelled');
+  let copied;
+  assert.equal(await sharing.shareEntryLink(url, { clipboard: {
+    writeText: async value => { copied = value; },
+  } }, () => assert.fail('Unexpected manual fallback')), 'copied');
+  assert.equal(copied, url);
+  let manual;
+  assert.equal(await sharing.shareEntryLink(url, {
+    share: async () => { throw new Error('Unavailable'); },
+    clipboard: { writeText: async () => { throw new Error('Denied'); } },
+  }, value => { manual = value; }), 'manual');
+  assert.equal(manual, url);
+  assert.equal(sharing.warnings.length, 2);
+});
+
+test('sign-in resumes a battle vote on the captured artwork ID rather than the passing car', async () => {
+  const entry = { reg: { id: 'chosen', competitionId: 'week', status: 'departed', writerUid: 'artist' } };
+  let pending;
+  const voted = [];
+  const context = extract(['castCompetitionVote'], {
+    cardEntryAt: () => entry, cardCar: 0, competitions: [{ id: 'week' }],
+    competitionOpen: () => true, signedIn: () => false,
+    requireAuth: callback => { pending = callback; },
+    currentUser: { uid: 'voter' }, competitionVoteBusy: null, sharedEntry: null,
+    refreshCard() {}, renderSharedEntry() {},
+    roll: { entries: [entry] }, subwayReel: { entries: [] },
+    voteCompetition: async id => { voted.push(id); return { votes: 1, already: false }; },
+    localStorage: { setItem() {} }, showToast() {}, console,
+  });
+  context.castCompetitionVote();
+  context.cardEntryAt = () => ({ reg: { id: 'different', competitionId: 'week' } });
+  context.signedIn = () => true;
+  pending();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(voted, ['chosen']);
+  assert.equal(entry.reg.competitionVotes, 1);
+});

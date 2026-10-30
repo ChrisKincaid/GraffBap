@@ -46,6 +46,7 @@ import {
   voteCompetition, watchCompetitions, watchCompetitionEntries, watchRankedCompetitionAvailability, type Competition,
 } from './services/competitions';
 import { localEmulators } from './services/local-environment';
+import { entryRouteId, entryShareUrl, shareEntryLink } from './services/entry-sharing';
 
 const promoService = new PromoService();
 let globalCarsSpawned = 0;
@@ -2383,6 +2384,7 @@ function isTyping(t: EventTarget | null): boolean {
 
 window.addEventListener('keydown', (e) => {
   if (document.querySelector('dialog[open]')) return;
+  if (entryRouteId(location.hash) !== null) return;
   if (!benchEl.hidden) {
     if (e.key === 'Escape') {
       e.preventDefault();
@@ -4165,6 +4167,7 @@ function reportEntry(e: RollEntry, id: ReelId): void {
       else showToast('Report received - thanks for helping keep the line clean.');
       markReported(reportKey);
       renderReelBar(id);
+      renderSharedEntry();
     })
     .catch((err) => {
       console.error('Report failed', err);
@@ -4258,20 +4261,13 @@ function renderCard(e: RollEntry): void {
   if (mine) renderPaintBtn();
   ccPropsCount.textContent = String(entryProps(e, meta));
   renderRating(e, cardRatingUI);
-  const competition = competitions.find(item => item.id === e.reg?.competitionId);
   const competitionPanel = document.getElementById('cc-competition')!;
   competitionPanel.hidden = !e.reg?.competitionId;
   ccTally.hidden = !!e.reg?.competitionId;
   ccPropsBtn.hidden = ccToyBtn.hidden = !!e.reg?.competitionId;
   if (e.reg?.competitionId) {
-    const open = !!competition && competitionOpen(competition);
-    document.getElementById('cc-competition-status')!.textContent =
-      `${competition?.title ?? 'Competition'} · ${e.reg.competitionVotes ?? 0} votes · ${open ? 'Voting open' : competition?.status === 'open' ? 'Results pending' : 'Voting closed'}`;
-    const button = document.getElementById('cc-competition-vote') as HTMLButtonElement;
-    const voted = !!currentUser && localStorage.getItem(`competition-vote/${currentUser.uid}/${e.reg.id}`) === 'yes';
-    const viewingPast = competitionView && archivesView;
-    button.textContent = mine ? 'Your Entry' : voted ? 'Voted' : open ? viewingPast ? 'View Current to Vote' : 'Vote for This Entry' : 'Voting Closed';
-    button.disabled = !open || viewingPast || mine || voted || competitionVoteBusy === e.reg.id;
+    renderEntryVote(e.reg, document.getElementById('cc-competition-vote') as HTMLButtonElement,
+      document.getElementById('cc-competition-status')!, competitionView && archivesView);
   }
   if (e.reg?.basedOnWriter) ccBy.textContent = `${ccBy.textContent} · over ${e.reg.basedOnWriter}`;
   const n = reelLength(cardSrc);
@@ -5000,6 +4996,7 @@ welcomeDialog.addEventListener('close', () => {
   }
 });
 function showWelcomeIfNeeded(): void {
+  if (entryRouteId(location.hash) !== null) return;
   try {
     if (localStorage.getItem(WELCOME_KEY) === '1') return;
   } catch {
@@ -5439,6 +5436,7 @@ const practiceNote = document.getElementById('practice-note')!;
 // #gallery (default landing) shows the reel; #yard is the paint app.
 function applyRoute(): void {
   const gallery = location.hash !== '#yard';
+  const shared = entryRouteId(location.hash) !== null;
   if (gallery) {
     flushActiveCar();
     if (paintingCompetition) restoreNormalEditor();
@@ -5449,7 +5447,7 @@ function applyRoute(): void {
       myWork.top = myWork.sub = false;
       renderMyWorkBtn('top');
       renderMyWorkBtn('sub');
-      if (roll?.showcase) void startMainline();
+      if (!shared && roll?.showcase) void startMainline();
     }
     renderCompetitionChrome();
     if (practiceMode) {
@@ -5458,9 +5456,9 @@ function applyRoute(): void {
     }
     sessionStorage.removeItem(SESSION_KEY);
     if (roll && !roll.showcase) exitRollBy(-1);
-    if (!roll) void startMainline();
+    if (!shared && !roll) void startMainline();
     // Always refetch so a car just posted from the editor shows up on the line.
-    loadSubwayLine(subwayReel.yard);
+    if (!shared) loadSubwayLine(subwayReel.yard);
   } else {
     // Tear the landing reel down so the editor underneath is revealed.
     if (roll?.showcase) exitRollBy(-1);
@@ -5494,6 +5492,7 @@ function applyRoute(): void {
   }
   practiceNote.hidden = gallery || !practiceMode;
   renderCompetitionPainting();
+  syncSharedEntryRoute();
 }
 
 // Blank steel on a randomly picked body, writing to a brand-new piece.
@@ -6387,6 +6386,12 @@ const chooser = document.getElementById('competition-chooser') as HTMLDialogElem
 const submitDialog = document.getElementById('competition-confirm') as HTMLDialogElement;
 let submitBusy = false;
 let competitionVoteBusy: string | null = null;
+const sharedEntryView = document.getElementById('shared-entry')!;
+let sharedEntry: RollEntry | null = null;
+let sharedRoute: string | null = null;
+let sharedEntryToken = 0;
+let stopSharedEntry: (() => void) | null = null;
+const sharedBackground = new Map<HTMLElement, boolean>();
 const entrySubscriptions: Partial<Record<ReelId, {
   id: string; watched: Set<string>; stops: (() => void)[];
 }>> = {};
@@ -6649,6 +6654,10 @@ watchCompetitions(items => {
   competitions = items;
   competitionsLoaded = true;
   updateArchiveChoices();
+  if (entryRouteId(location.hash) !== null) {
+    renderSharedEntry();
+    return;
+  }
   if (previous !== selection()) reloadCompetitionReels();
   else {
     renderCompetitionChrome();
@@ -6808,21 +6817,176 @@ document.getElementById('competition-submit-confirm')!.addEventListener('click',
   }
 });
 
-function castCompetitionVote(): void {
-  const entry = cardEntryAt(cardCar);
+function renderEntryVote(reg: RegistryCar, button: HTMLButtonElement, status: HTMLElement, viewingPast = false): void {
+  const competition = competitions.find(item => item.id === reg.competitionId);
+  const open = !!competition && competitionOpen(competition);
+  const mine = !!currentUser && reg.writerUid === currentUser.uid;
+  const voted = !!currentUser && localStorage.getItem(`competition-vote/${currentUser.uid}/${reg.id}`) === 'yes';
+  status.textContent =
+    `${competition?.title ?? 'Battle'} · ${reg.competitionVotes ?? 0} votes · ${open ? 'Voting open' :
+      !competitionsLoaded ? 'Checking battle...' : competition?.status === 'open' ? 'Results pending' : 'Voting closed'}`;
+  button.textContent = mine ? 'Your Entry' : voted ? 'Voted' : open
+    ? viewingPast ? 'View Current to Vote' : 'Vote for This Entry' : 'Voting Closed';
+  button.disabled = !open || viewingPast || mine || voted || competitionVoteBusy === reg.id ||
+    !['departed', 'hall_of_fame', 'museum'].includes(reg.status);
+}
+
+function renderSharedEntry(): void {
+  const reg = sharedEntry?.reg;
+  if (!reg) return;
+  const competition = competitions.find(item => item.id === reg.competitionId);
+  document.getElementById('shared-entry-title')!.textContent = competition?.title ?? 'Battle entry';
+  document.getElementById('shared-entry-writer')!.textContent = `by ${reg.writer}`;
+  const account = document.getElementById('shared-entry-account')!;
+  account.hidden = signedIn();
+  renderEntryVote(reg, document.getElementById('shared-entry-vote') as HTMLButtonElement,
+    document.getElementById('shared-entry-status')!);
+  (document.getElementById('shared-entry-report') as HTMLButtonElement).disabled = hasReported(reg.id);
+}
+
+function sharedEntryUnavailable(message: string): void {
+  sharedEntry = null;
+  document.getElementById('shared-entry-title')!.textContent = 'Piece unavailable';
+  document.getElementById('shared-entry-error')!.textContent = message;
+  for (const id of ['preview', 'vote', 'share', 'report']) document.getElementById(`shared-entry-${id}`)!.hidden = true;
+  document.getElementById('shared-entry-writer')!.textContent = '';
+  document.getElementById('shared-entry-status')!.textContent = '';
+}
+
+function syncSharedEntryRoute(): void {
+  const id = entryRouteId(location.hash);
+  if (id === sharedRoute) return;
+  sharedRoute = id;
+  const token = ++sharedEntryToken;
+  stopSharedEntry?.();
+  stopSharedEntry = null;
+  sharedEntry = null;
+  sharedEntryView.hidden = id === null;
+  document.body.classList.toggle('shared-entry-open', id !== null);
+  if (id === null) {
+    sharedBackground.forEach((inert, element) => { element.inert = inert; });
+    sharedBackground.clear();
+    return;
+  }
+  for (const element of document.body.children) {
+    if (!(element instanceof HTMLElement) || element.matches('#shared-entry, #writer-id, #toast, dialog, script')) continue;
+    if (!sharedBackground.has(element)) sharedBackground.set(element, element.inert);
+    element.inert = true;
+  }
+  showCard(-1);
+  closeBench();
+  document.getElementById('shared-entry-title')!.textContent = 'Loading piece...';
+  for (const key of ['writer', 'status', 'error']) document.getElementById(`shared-entry-${key}`)!.textContent = '';
+  for (const key of ['preview', 'vote', 'share', 'report', 'retry']) document.getElementById(`shared-entry-${key}`)!.hidden = true;
+  document.getElementById('shared-entry-title')!.focus();
+  if (!id) {
+    sharedEntryUnavailable('This entry link is invalid. Browse Battles to find a piece.');
+    return;
+  }
+  void (async () => {
+    try {
+      const reg = await getRegistryCar(id);
+      if (token !== sharedEntryToken) return;
+      if (!reg?.competitionId || !['departed', 'hall_of_fame', 'museum'].includes(reg.status)) {
+        sharedEntryUnavailable('This entry is no longer available. Browse Battles for more pieces.');
+        return;
+      }
+      const entry = regEntries([reg])[0];
+      if (!entry) throw new Error('This entry has an unsupported train.');
+      const paint = await entryImage(entry);
+      if (!paint) throw new Error('The artwork could not load. Please try again.');
+      if (token !== sharedEntryToken) {
+        if (paint instanceof ImageBitmap) paint.close();
+        return;
+      }
+      const canvas = document.getElementById('shared-entry-preview') as HTMLCanvasElement;
+      const image = renderCarImage(entryBaseId(entry), paint, false, canvas.width / CAR_WIDTH);
+      canvas.height = image.height;
+      canvas.getContext('2d')!.drawImage(image, 0, 0);
+      if (paint instanceof ImageBitmap) paint.close();
+      sharedEntry = entry;
+      for (const key of ['preview', 'vote', 'share', 'report']) document.getElementById(`shared-entry-${key}`)!.hidden = false;
+      renderSharedEntry();
+      stopSharedEntry = watchCompetitionEntries([id], (cars, missing) => {
+        if (token !== sharedEntryToken) return;
+        const current = cars[0];
+        if (missing.length || !current?.competitionId || !['departed', 'hall_of_fame', 'museum'].includes(current.status)) {
+          sharedEntryUnavailable('This entry is no longer available. Browse Battles for more pieces.');
+          return;
+        }
+        if (sharedEntry) sharedEntry.reg = current;
+        renderSharedEntry();
+      }, error => {
+        if (token !== sharedEntryToken) return;
+        console.error('Shared entry updates failed', error);
+        sharedEntryUnavailable(`Could not update this entry: ${actionError(error)}`);
+        document.getElementById('shared-entry-retry')!.hidden = false;
+      });
+    } catch (error) {
+      if (token !== sharedEntryToken) return;
+      console.error('Shared entry failed to load', error);
+      sharedEntryUnavailable(actionError(error));
+      document.getElementById('shared-entry-retry')!.hidden = false;
+    }
+  })();
+}
+
+async function shareBattleEntry(entry: RollEntry | null): Promise<void> {
   if (!entry?.reg?.competitionId) return;
-  if (!signedIn()) return requireAuth(castCompetitionVote, true);
+  try {
+    const url = entryShareUrl(entry.reg.id, location.href);
+    const result = await shareEntryLink(url, navigator, link => {
+      const dialog = document.getElementById('entry-share-dialog') as HTMLDialogElement;
+      const input = document.getElementById('entry-share-link') as HTMLInputElement;
+      input.value = link;
+      if (!dialog.open) dialog.showModal();
+      input.focus();
+      input.select();
+    });
+    if (result === 'copied') showToast('Link copied. Send it to your crew.');
+  } catch (error) {
+    console.error('Entry sharing failed', error);
+    showToast(actionError(error), 6000);
+  }
+}
+
+document.getElementById('cc-competition-share')!.addEventListener('click', () => void shareBattleEntry(cardEntryAt(cardCar)));
+document.getElementById('shared-entry-share')!.addEventListener('click', () => void shareBattleEntry(sharedEntry));
+document.getElementById('entry-share-close')!.addEventListener('click', () =>
+  (document.getElementById('entry-share-dialog') as HTMLDialogElement).close());
+document.getElementById('shared-entry-account')!.addEventListener('click', startBoxBapAuth);
+document.getElementById('shared-entry-browse')!.addEventListener('click', () => { location.hash = '#competitions'; });
+document.getElementById('shared-entry-retry')!.addEventListener('click', () => {
+  sharedRoute = null;
+  syncSharedEntryRoute();
+});
+document.getElementById('shared-entry-report')!.addEventListener('click', () => {
+  if (sharedEntry) reportEntry(sharedEntry, 'top');
+});
+
+function castCompetitionVote(entry: RollEntry | null = cardEntryAt(cardCar), shared = false): void {
+  if (!entry?.reg?.competitionId) return;
   const id = entry.reg.id;
+  if (shared && sharedEntry?.reg?.id !== id) return;
+  const competition = competitions.find(item => item.id === entry.reg?.competitionId);
+  if (!competition || !competitionOpen(competition) ||
+      !['departed', 'hall_of_fame', 'museum'].includes(entry.reg.status)) return;
+  if (!signedIn()) return requireAuth(() => castCompetitionVote(entry, shared), true);
   const uid = currentUser!.uid;
+  if (entry.reg.writerUid === uid) return;
   if (competitionVoteBusy) return;
   competitionVoteBusy = id;
-  const button = document.getElementById('cc-competition-vote') as HTMLButtonElement;
-  button.disabled = true;
+  refreshCard();
+  renderSharedEntry();
   void voteCompetition(id).then(result => {
-    for (const item of [...roll?.entries ?? [], ...subwayReel.entries]) {
+    for (const item of [...roll?.entries ?? [], ...subwayReel.entries, entry, ...(sharedEntry ? [sharedEntry] : [])]) {
       if (item.reg?.id === id) item.reg.competitionVotes = result.votes;
     }
-    localStorage.setItem(`competition-vote/${uid}/${id}`, 'yes');
+    try {
+      localStorage.setItem(`competition-vote/${uid}/${id}`, 'yes');
+    } catch (error) {
+      console.warn('Vote recorded, but this browser could not remember it locally.', error);
+    }
     showToast(result.already ? 'You already voted for this entry.' : 'Competition vote recorded.');
   }).catch(error => {
     console.error('Competition vote failed', error);
@@ -6830,12 +6994,15 @@ function castCompetitionVote(): void {
   }).finally(() => {
     competitionVoteBusy = null;
     refreshCard();
+    renderSharedEntry();
   });
 }
-document.getElementById('cc-competition-vote')!.addEventListener('click', castCompetitionVote);
+document.getElementById('cc-competition-vote')!.addEventListener('click', () => castCompetitionVote());
+document.getElementById('shared-entry-vote')!.addEventListener('click', () => castCompetitionVote(sharedEntry, true));
 window.setInterval(() => {
   renderCompetitionHeadings();
   if (cardCar >= 0 && cardEntryAt(cardCar)?.reg?.competitionId) refreshCard();
+  renderSharedEntry();
 }, 1000);
 if (localEmulators) {
   const label = document.createElement('span');
