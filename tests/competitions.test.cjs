@@ -57,6 +57,7 @@ test('confirmation reuses the full selected train renderer and clears the old pr
   const context = extract(['confirmCompetitionEntry'], {
     paintingCompetition: { title: 'Weekly Wildstyle' }, car: () => ({ hasPaint: true }),
     competitionOpen: () => true, competitionDeadline: () => 'Monday', currentYard: 'subway',
+    competitionEntryIndex: 0, competitionSurfaceLimit: () => 5,
     currentCarIndex: 3, CAR_WIDTH: 4000, paintLayer,
     baseIdFor: (yard, index) => {
       assert.equal(yard, 'subway');
@@ -352,6 +353,42 @@ test('entry routes validate permanent IDs and share URLs keep the current host w
   assert.equal(sharing.entryShareUrl('test', 'http://127.0.0.1:5174/#gallery'),
     'http://127.0.0.1:5174/#entry=test');
   assert.throws(() => sharing.entryShareUrl('../no', 'https://example.test'), /valid share link/);
+});
+
+test('per-surface entry selection preserves legacy slot zero and enforces five weekly/fifteen monthly', () => {
+  const serviceSource = fs.readFileSync(path.join(root, 'src', 'services', 'competitions.ts'), 'utf8');
+  const serviceAst = ts.createSourceFile('competitions.ts', serviceSource, ts.ScriptTarget.Latest, true);
+  const helper = serviceAst.statements.find(node => ts.isFunctionDeclaration(node) && node.name.text === 'nextCompetitionEntry');
+  const scope = vm.createContext({ exports: {}, competitionSurfaceLimit: kind => kind === 'weekly' ? 5 : 15 });
+  vm.runInContext(ts.transpileModule(helper.getText(serviceAst), {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+  }).outputText, scope);
+  const legacy = [{ id: 'legacy', division: 'freight' }];
+  assert.equal(scope.nextCompetitionEntry(legacy, 'freight', 'weekly'), 1);
+  assert.equal(scope.nextCompetitionEntry(legacy, 'subway', 'weekly'), 0);
+  const five = Array.from({ length: 5 }, (_, entryIndex) => ({ id: `${entryIndex}`, division: 'freight', entryIndex }));
+  assert.equal(scope.nextCompetitionEntry(five, 'freight', 'weekly'), null);
+  assert.equal(scope.nextCompetitionEntry(five, 'freight', 'monthly'), 5);
+  assert.equal(scope.nextCompetitionEntry(five, 'subway', 'weekly'), 0);
+  assert.equal(scope.nextCompetitionEntry(Array.from({ length: 15 }, (_, entryIndex) =>
+    ({ id: `${entryIndex}`, division: 'subway', entryIndex })), 'subway', 'monthly'), null);
+});
+
+test('competition draft keys separate entry numbers and surfaces but retain the legacy first-draft key', () => {
+  const declaration = ast.statements.find(node => ts.isVariableStatement(node) &&
+    node.declarationList.declarations.some(declaration => declaration.name.getText(ast) === 'localKey'));
+  const scope = vm.createContext({
+    paintingCompetition: { id: 'week' }, competitionPainterUid: 'artist', competitionEntryIndex: 0,
+  });
+  vm.runInContext(ts.transpileModule(declaration.getText(ast), {
+    compilerOptions: { target: ts.ScriptTarget.ES2022 },
+  }).outputText + '\nglobalThis.draftKey = localKey;', scope);
+  assert.equal(scope.draftKey('train', 0), 'competition/artist/week/train/0');
+  scope.competitionEntryIndex = 1;
+  assert.equal(scope.draftKey('train', 0), 'competition/artist/week/train/0/entry/1');
+  assert.equal(scope.draftKey('subway', 0), 'competition/artist/week/subway/0/entry/1');
+  scope.paintingCompetition = null;
+  assert.equal(scope.draftKey('train', 0), 'train/0');
 });
 
 test('native sharing uses restrained copy, cancellation does not copy, and denied clipboard shows a usable link', async () => {

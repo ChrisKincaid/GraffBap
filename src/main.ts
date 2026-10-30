@@ -42,7 +42,8 @@ import { reportArtwork } from './report-dialog';
 import { actionError } from './services/protected-actions';
 import { PromoService, type PromoAd } from './services/promoService';
 import {
-  competitionDeadline, competitionOpen, competitionPager, hasCompetitionEntry, pastCompetitions, submitCompetition,
+  competitionDeadline, competitionOpen, competitionPager, ownCompetitionEntries, nextCompetitionEntry,
+  competitionSurfaceLimit, pastCompetitions, submitCompetition,
   voteCompetition, watchCompetitions, watchCompetitionEntries, watchRankedCompetitionAvailability, type Competition,
 } from './services/competitions';
 import { localEmulators } from './services/local-environment';
@@ -676,6 +677,7 @@ const surfaceFor = (division: string): YardId => (division === 'subway' ? 'subwa
 const yardConsists = Object.fromEntries(Object.keys(YARDS).map((id) => [id, makeConsist()])) as Record<YardId, Car[]>;
 let paintingCompetition: Competition | null = null;
 let competitionPainterUid: string | null = null;
+let competitionEntryIndex = 0;
 let normalEditor: {
   train: Car[]; subway: Car[]; yard: YardId; index: number;
   pieceId: string | null; basedOn: { id: string; writer: string } | null;
@@ -3181,7 +3183,7 @@ function blobToDataUrl(blob: Blob): Promise<string> {
 }
 
 const localKey = (yard: YardId, index: number) =>
-  paintingCompetition ? `competition/${competitionPainterUid}/${paintingCompetition.id}/${yard}/${index}` : `${yard}/${index}`;
+  paintingCompetition ? `competition/${competitionPainterUid}/${paintingCompetition.id}/${yard}/${index}${competitionEntryIndex ? `/entry/${competitionEntryIndex}` : ''}` : `${yard}/${index}`;
 const pieceKey = (id: string) => `piece/${id}`;
 
 // Firestore caps a document at 1 MiB; leave room for the other fields.
@@ -6675,63 +6677,98 @@ watchCompetitions(items => {
 async function chooseCompetition(): Promise<void> {
   if (!signedIn()) return requireAuth(() => void chooseCompetition(), true);
   document.getElementById('competition-choice-message')!.textContent = '';
-  chooser.showModal();
+  if (!chooser.open) chooser.showModal();
+  await updateCompetitionAllowance();
+}
+
+let allowanceRequest = 0;
+let beginningCompetition = false;
+async function updateCompetitionAllowance(): Promise<void> {
+  const request = ++allowanceRequest;
+  const uid = currentUser?.uid;
+  if (!uid) return;
+  document.getElementById('competition-choice-message')!.textContent = '';
+  const surface = (document.getElementById('competition-surface') as HTMLSelectElement).value;
+  const division = surface === 'subway' ? 'subway' : 'freight';
+  for (const kind of ['monthly', 'weekly'] as const) {
+    (document.getElementById(`enter-${kind}`) as HTMLButtonElement).disabled = true;
+  }
   for (const kind of ['monthly', 'weekly'] as const) {
     const competition = currentCompetition(kind);
     const button = document.getElementById(`enter-${kind}`) as HTMLButtonElement;
     button.textContent = competition ? `${kind === 'monthly' ? 'Monthly' : 'Weekly'}: ${competition.title}` : `No current ${kind} competition`;
     button.disabled = true;
     try {
-      const entered = competition && await hasCompetitionEntry(competition.id, currentUser!.uid);
+      const entries = competition ? await ownCompetitionEntries(competition.id, uid) : [];
+      if (request !== allowanceRequest || currentUser?.uid !== uid) return;
+      const used = entries.filter(entry => entry.division === division).length;
+      const limit = competitionSurfaceLimit(kind);
       const full = !!competition && (competition.entryCount ?? 0) >= (competition.maxEntries ?? 1000);
-      button.disabled = !competition || !!entered || competition.submissionEnabled === false || full;
-      if (entered) button.textContent += ' - Already entered';
+      button.disabled = !competition || used >= limit || competition.submissionEnabled === false || full;
+      if (competition) button.textContent += ` - ${used}/${limit} ${surface === 'subway' ? 'subways' : 'trains'} entered`;
+      if (used >= limit) button.textContent += ' - Limit reached';
       else if (full) button.textContent += ' - Full (1,000 entries)';
       else if (competition && button.disabled) button.textContent += ' - Logo submissions not yet available';
     } catch (error) {
+      if (request !== allowanceRequest || currentUser?.uid !== uid) return;
       console.error('Competition eligibility check failed', error);
       document.getElementById('competition-choice-message')!.textContent = actionError(error);
     }
   }
 }
+document.getElementById('competition-surface')!.addEventListener('change', () => void updateCompetitionAllowance());
 
 async function beginCompetition(kind: Competition['kind']): Promise<void> {
   const competition = currentCompetition(kind);
-  if (!competition || !signedIn()) return;
-  chooser.close();
-  flushActiveCar();
-  await saveChain;
-  leaveCar();
-  await saveChain;
-  normalEditor = {
-    train: yardConsists.train, subway: yardConsists.subway, yard: currentYard, index: currentCarIndex,
-    pieceId: currentPieceId, basedOn: pieceBasedOn,
-  };
-  paintingCompetition = competition;
-  competitionPainterUid = currentUser!.uid;
-  sessionStorage.setItem('graffbap_competition_editor', competition.id);
-  yardConsists.train = makeConsist();
-  yardConsists.subway = makeConsist();
+  if (!competition || !signedIn() || beginningCompetition) return;
+  beginningCompetition = true;
+  const uid = currentUser!.uid;
   const surface = (document.getElementById('competition-surface') as HTMLSelectElement).value;
-  currentYard = surface === 'subway' ? 'subway' : 'train';
-  consist = yardConsists[currentYard];
-  currentCarIndex = 0;
-  resetPieceSession();
-  pendingPiece = null;
-  pendingFresh = false;
-  applyCarBase(baseIdFor(currentYard, 0));
-  paintCtx.clearRect(0, 0, CAR_WIDTH, CAR_HEIGHT);
-  sketchCtx.clearRect(0, 0, CAR_WIDTH, CAR_HEIGHT);
-  sketchHas = false;
-  ++swapToken;
-  swapPending = false;
-  pendingYard = currentYard;
-  location.hash = '#yard';
+  try {
+    const entries = await ownCompetitionEntries(competition.id, uid);
+    if (currentUser?.uid !== uid) throw new Error('Sign back into the account that started this entry.');
+    if (!chooser.open || (document.getElementById('competition-surface') as HTMLSelectElement).value !== surface) return;
+    const index = nextCompetitionEntry(entries, surface === 'subway' ? 'subway' : 'freight', kind);
+    if (index === null) throw new Error(`You have used all ${competitionSurfaceLimit(kind)} entries for this surface.`);
+    chooser.close();
+    flushActiveCar();
+    await saveChain;
+    leaveCar();
+    await saveChain;
+    if (currentUser?.uid !== uid) throw new Error('Sign back into the account that started this entry.');
+    normalEditor = {
+      train: yardConsists.train, subway: yardConsists.subway, yard: currentYard, index: currentCarIndex,
+      pieceId: currentPieceId, basedOn: pieceBasedOn,
+    };
+    paintingCompetition = competition;
+    competitionPainterUid = uid;
+    competitionEntryIndex = index;
+    sessionStorage.setItem('graffbap_competition_editor', competition.id);
+    yardConsists.train = makeConsist();
+    yardConsists.subway = makeConsist();
+    currentYard = surface === 'subway' ? 'subway' : 'train';
+    consist = yardConsists[currentYard];
+    currentCarIndex = 0;
+    resetPieceSession();
+    pendingPiece = null;
+    pendingFresh = false;
+    applyCarBase(baseIdFor(currentYard, 0));
+    paintCtx.clearRect(0, 0, CAR_WIDTH, CAR_HEIGHT);
+    sketchCtx.clearRect(0, 0, CAR_WIDTH, CAR_HEIGHT);
+    sketchHas = false;
+    ++swapToken;
+    swapPending = false;
+    pendingYard = currentYard;
+    location.hash = '#yard';
+  } finally {
+    beginningCompetition = false;
+  }
 }
 
 function restoreNormalEditor(): void {
   paintingCompetition = null;
   competitionPainterUid = null;
+  competitionEntryIndex = 0;
   sessionStorage.removeItem('graffbap_competition_editor');
   document.body.classList.remove('competition-paint');
   if (!normalEditor) return;
@@ -6780,7 +6817,8 @@ document.getElementById('competition-cancel')!.addEventListener('click', () => c
 function confirmCompetitionEntry(): void {
   if (!paintingCompetition || !car().hasPaint) return showToast('Paint your entry before submitting.');
   if (!competitionOpen(paintingCompetition)) return showToast('This competition has closed. Your draft stays on this device.');
-  document.getElementById('competition-confirm-text')!.textContent = `${paintingCompetition.title} · closes ${competitionDeadline(paintingCompetition)}`;
+  document.getElementById('competition-confirm-text')!.textContent =
+    `${paintingCompetition.title} · ${currentYard === 'subway' ? 'Subway' : 'Train'} entry ${competitionEntryIndex + 1}/${competitionSurfaceLimit(paintingCompetition.kind)} · closes ${competitionDeadline(paintingCompetition)}`;
   document.getElementById('competition-submit-error')!.textContent = '';
   const preview = document.getElementById('competition-confirm-preview') as HTMLCanvasElement;
   const image = renderCarImage(baseIdFor(currentYard, currentCarIndex), paintLayer, true, preview.width / CAR_WIDTH);
@@ -6799,10 +6837,13 @@ document.getElementById('competition-submit-confirm')!.addEventListener('click',
   try {
     if (!currentUser || currentUser.isAnonymous) throw new Error('Sign in before submitting a competition entry.');
     if (currentUser.uid !== competitionPainterUid) throw new Error('Sign back into the account that started this competition draft.');
-    await submitCompetition(paintingCompetition.id, {
+    const result = await submitCompetition(paintingCompetition.id, {
       yard: currentYard, division: YARDS[currentYard].division, slot: currentCarIndex,
       writer: writerHandle(currentUser), image: await encodeForUpload(copyBody()),
-    });
+    }, competitionEntryIndex);
+    if (result.already && !result.sameArtwork) {
+      throw new Error('This entry number was already submitted in another tab. Your draft is still saved here; the submitted artwork was not changed.');
+    }
     savePending = false;
     submitDialog.close();
     showToast('Competition entry submitted! Your artwork is now locked.');

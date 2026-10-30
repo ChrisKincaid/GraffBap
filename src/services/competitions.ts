@@ -96,10 +96,29 @@ export function competitionPager(
   };
 }
 
-export async function hasCompetitionEntry(competitionId: string, uid: string): Promise<boolean> {
+export interface CompetitionEntrySlot {
+  id: string;
+  division: 'freight' | 'subway';
+  entryIndex?: number;
+}
+
+export const competitionSurfaceLimit = (kind: Competition['kind']): number => kind === 'weekly' ? 5 : 15;
+
+export function nextCompetitionEntry(entries: CompetitionEntrySlot[], division: CompetitionEntrySlot['division'], kind: Competition['kind']): number | null {
+  const maximum = competitionSurfaceLimit(kind);
+  const surface = entries.filter(entry => entry.division === division);
+  if (surface.length >= maximum) return null;
+  const used = new Set(surface.map(entry => entry.entryIndex ?? 0));
+  for (let index = 0; index < maximum; index++) if (!used.has(index)) return index;
+  return null;
+}
+
+export async function ownCompetitionEntries(competitionId: string, uid: string): Promise<CompetitionEntrySlot[]> {
   const snapshot = await getDocs(query(collection(db, 'graffiti_cars'),
-    where('competitionId', '==', competitionId), where('writerUid', '==', uid), limit(1)));
-  return !snapshot.empty;
+    where('competitionId', '==', competitionId), where('writerUid', '==', uid), limit(31)));
+  return snapshot.docs.map(document => ({
+    id: document.id, division: document.data().division, entryIndex: document.data().entryIndex,
+  }));
 }
 
 export function watchCompetitionEntries(
@@ -120,11 +139,12 @@ export function watchCompetitionEntries(
 export function submitCompetition(
   competitionId: string,
   artwork: Pick<RegistryCar, 'yard' | 'division' | 'slot' | 'writer' | 'image'>,
-): Promise<{ id: string }> {
+  entryIndex: number,
+): Promise<{ id: string; already: boolean; sameArtwork?: boolean }> {
   requireAbuseProtection();
-  return httpsCallable<typeof artwork & { competitionId: string }, { id: string }>(
+  return httpsCallable<typeof artwork & { competitionId: string; entryIndex: number }, { id: string; already: boolean; sameArtwork?: boolean }>(
     graffitiFunctions, 'competitionSubmit',
-  )({ ...artwork, competitionId }).then(result => result.data);
+  )({ ...artwork, competitionId, entryIndex }).then(result => result.data);
 }
 
 export function voteCompetition(id: string): Promise<{ votes: number; already: boolean }> {

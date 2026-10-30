@@ -221,10 +221,107 @@ test(`${surface} competition draft previews the whole car and submits despite cl
   expect(fields.createdAt).toEqual(fields.submittedAt);
   await expect(page).toHaveURL(/#competitions$/, { timeout: 20_000 });
   await page.locator('#paint-start').click();
-  await expect(page.locator('#enter-weekly')).toBeDisabled();
-  await expect(page.locator('#enter-weekly')).toContainText('Already entered');
+  await expect(page.locator('#enter-weekly')).toBeEnabled();
+  await expect(page.locator('#enter-weekly')).toContainText(`1/5 ${surface === 'train' ? 'trains' : 'subways'} entered`);
+  expect(payload.entryIndex).toBe(0);
+  await page.locator('#enter-weekly').click();
+  await expect(page.locator('#save-status')).toContainText('Competition draft - not submitted');
+  await page.locator('#save-car').click();
+  await expect(page.locator('#competition-confirm')).not.toBeVisible();
+  // A submitted entry must not reappear as the next entry's private draft.
+  await page.mouse.move(bounds.width * 0.4, bounds.height * 0.5);
+  await page.mouse.down();
+  await page.mouse.move(bounds.width * 0.6, bounds.height * 0.5, { steps: 25 });
+  await page.mouse.up();
+  await page.locator('#save-car').click();
+  await expect(page.locator('#competition-confirm-text')).toContainText('entry 2/5');
+  await page.locator('#competition-submit-cancel').click();
+  await page.locator('#back-dispatch').click();
+  await page.locator('#paint-start').click();
+  await expect(page.locator('#enter-weekly')).toBeEnabled();
+  await page.locator('#enter-weekly').click();
+  await expect(page.locator('#save-status')).toContainText('draft restored');
+  await page.locator('#save-car').click();
+  const secondResponse = page.waitForResponse(response => response.url().endsWith('/competitionSubmit'));
+  await page.locator('#competition-submit-confirm').click();
+  const second = await secondResponse;
+  expect(second.status()).toBe(200);
+  expect(second.request().postDataJSON().data.entryIndex).toBe(1);
+  expect((await second.json()).result.id).not.toBe(result.id);
+  await expect(page).toHaveURL(/#competitions$/);
+  await page.locator('#paint-start').click();
+  await expect(page.locator('#enter-weekly')).toContainText('2/5');
+  await page.locator('#competition-surface').selectOption(surface === 'train' ? 'subway' : 'train');
+  await expect(page.locator('#enter-weekly')).toContainText('0/5');
+  await expect(page.locator('#enter-weekly')).toBeEnabled();
 });
 }
+
+for (const [kind, maximum, competitionId] of [
+  ['weekly', 5, 'weekly_2026-10-26'], ['monthly', 15, 'monthly_2026-10'],
+] as const) test(`${kind} chooser enforces its per-surface allowance without blocking the other surface`, async ({ page }) => {
+  const email = await newLocalAccount(page, `allowance-${kind}`);
+  const headers = { Authorization: 'Bearer owner' };
+  const base = 'http://127.0.0.1:8080/v1/projects/demo-graphbap/databases/main/documents';
+  const signedIn = await page.request.post(
+    'http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=demo-graphbap-local-key',
+    { data: { email, password: 'LocalTest123!', returnSecureToken: true } });
+  const { localId } = await signedIn.json();
+  const ids = Array.from({ length: maximum }, (_, index) => `allowance-${localId}-${index}`);
+  try {
+    for (const [index, id] of ids.entries()) {
+      const response = await page.request.patch(`${base}/graffiti_cars/${id}`, {
+        headers, data: { fields: {
+          competitionId: { stringValue: competitionId }, writerUid: { stringValue: localId },
+          division: { stringValue: 'freight' }, entryIndex: { integerValue: String(index) },
+          status: { stringValue: 'buffed' },
+        } },
+      });
+      expect(response.ok()).toBe(true);
+    }
+    await login(page, email);
+    await page.locator('#competitions-start').click();
+    await page.locator('#paint-start').click();
+    await expect(page.locator(`#enter-${kind}`)).toContainText(`${maximum}/${maximum} trains entered - Limit reached`);
+    await expect(page.locator(`#enter-${kind}`)).toBeDisabled();
+    await page.locator('#competition-surface').selectOption('subway');
+    await expect(page.locator(`#enter-${kind}`)).toContainText(`0/${maximum} subways entered`);
+    await expect(page.locator(`#enter-${kind}`)).toBeEnabled();
+    await page.locator('#enter-weekly').click();
+    await expect(page).toHaveURL(/#yard$/);
+  } finally {
+    for (const id of ids) {
+      expect((await page.request.delete(`${base}/graffiti_cars/${id}`, { headers })).ok()).toBe(true);
+    }
+  }
+});
+
+test('a different piece submitted in another tab cannot silently discard this draft', async ({ page }) => {
+  await login(page, await newLocalAccount(page, 'occupied'));
+  await page.locator('#competitions-start').click();
+  await page.locator('#paint-start').click();
+  await page.locator('#enter-weekly').click();
+  const canvas = page.locator('#viewport');
+  await page.mouse.move(400, 400);
+  await page.mouse.down();
+  await page.mouse.move(700, 400, { steps: 25 });
+  await page.mouse.up();
+  await expect(canvas).toBeVisible();
+  await page.locator('#save-car').click();
+  await expect(page.locator('#competition-confirm')).toBeVisible();
+  await page.route('**/competitionSubmit', route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({ result: { id: 'existing-other-piece', already: true, sameArtwork: false } }),
+  }));
+  await page.locator('#competition-submit-confirm').click();
+  await expect(page.locator('#competition-submit-error')).toContainText('already submitted in another tab');
+  await expect(page.locator('#competition-confirm')).toBeVisible();
+  await page.locator('#competition-submit-cancel').click();
+  await page.locator('#back-dispatch').click();
+  await page.locator('#paint-start').click();
+  await page.locator('#enter-weekly').click();
+  await expect(page.locator('#save-status')).toContainText('draft restored');
+});
 
 test('signed-in competition voting is positive-only and reporting reuses existing dialog', async ({ page }) => {
   await login(page, await newLocalAccount(page, 'voter'));
@@ -392,11 +489,10 @@ test('sparse launch hides empty past choices and unnecessary single-option dropd
     const carsResponse = await page.request.get(`${root}/graffiti_cars?pageSize=1000`, { headers });
     expect(carsResponse.ok()).toBe(true);
     const cars = (await carsResponse.json()).documents ?? [];
-    for (const car of cars) {
-      if (!car.fields.competitionId) continue;
+    await Promise.all(cars.filter(car => car.fields.competitionId).map(async car => {
       restore.push({ name: car.name, fields: { competitionVotes: car.fields.competitionVotes } });
       await patch(car.name, { competitionVotes: { integerValue: '0' } });
-    }
+    }));
     await page.locator('#competitions-start').click();
     await page.locator('#competition-view-toggle').click();
     await expect(page.locator('#monthly-archive option')).toHaveCount(1);
@@ -407,13 +503,13 @@ test('sparse launch hides empty past choices and unnecessary single-option dropd
     await expect(page.locator('#subway-title')).toContainText('Weekly Wildstyle');
     const competitionsResponse = await page.request.get(`${root}/graffiti_competitions?pageSize=1000`, { headers });
     expect(competitionsResponse.ok()).toBe(true);
-    for (const competition of (await competitionsResponse.json()).documents ?? []) {
-      if (competition.fields.status.stringValue !== 'archived') continue;
+    await Promise.all(((await competitionsResponse.json()).documents ?? [])
+      .filter(competition => competition.fields.status.stringValue === 'archived').map(async competition => {
       restore.push({ name: competition.name, fields: {
         results: competition.fields.results, entryCount: competition.fields.entryCount,
       } });
       await patch(competition.name, { results: { arrayValue: { values: [] } }, entryCount: { integerValue: '0' } });
-    }
+      }));
     await expect(page.locator('#monthly-archive option')).toHaveCount(0);
     await expect(page.locator('#weekly-archive option')).toHaveCount(0);
     await expect(page.locator('#reel-title')).toContainText('No past battles yet');
@@ -423,6 +519,6 @@ test('sparse launch hides empty past choices and unnecessary single-option dropd
     await expect(page.locator('#paint-start')).toBeVisible();
     await expect(page.locator('#reel-title')).toContainText('Haunted Yard');
   } finally {
-    for (const item of restore.reverse()) await patch(item.name, item.fields);
+    await Promise.all(restore.map(item => patch(item.name, item.fields)));
   }
 });

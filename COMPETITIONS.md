@@ -1,8 +1,10 @@
 # Competitions
 
-Local development and the production release use separate configurations. Do not deploy
-hosting by itself: the competition callables, scheduler, indexes, and reviewed
-rules changes must be released together after approval.
+Local development and production use separate configurations. The initial release
+required competition callables, scheduler, indexes, and reviewed rules together.
+Later releases must deploy only their changed dependencies: for entry allowances,
+deploy `competitionSubmit` first, then Graph Bap hosting. Do not redeploy unrelated
+Functions, sites, rules or indexes.
 
 ## Local preview
 
@@ -60,7 +62,8 @@ at the bottom, each accepting freight and subway artwork. No promos are injected
 into these views. Archives and All-Time feeds page in leaderboard order rather
 than downloading the full collection.
 Open battles instead page through the full battle in a stable mixed order:
-entry IDs contain a server-generated SHA-256 hash of the writer UID. Each visit
+entry IDs contain a server-generated SHA-256 hash of the writer UID/surface/entry
+number (legacy entries hash only the UID). Each visit
 picks a random starting hash, walks IDs in order, and wraps once to the beginning.
 The same starting point is retained across filters and Current/Past navigation
 until the page is reloaded. Vote changes do not change positions or reset the
@@ -103,7 +106,10 @@ Do Battle (subtext: Paint an entry) requires an account, then asks weekly/monthl
 The existing editor displays the competition/theme/deadline banner and replaces
 POST with SUBMIT ENTRY. It saves competition drafts on this device only until
 explicit confirmation. Drafts are separated from normal artwork and account
-identities. Submitted snapshots cannot be repainted. After refreshing an active
+identities, surfaces and entry numbers. Submitted snapshots cannot be repainted.
+The chooser shows the selected surface's used/maximum allowance. After a successful
+submission, the next entry starts with a separate blank draft; an unfinished next
+entry can be resumed independently. After refreshing an active
 competition editor, choose Do Battle again to resume the local draft.
 Confirmation shows the selected train/subway with its paint using the same
 compositor as train exports; uploads still contain only the paint layer.
@@ -114,10 +120,18 @@ deadline. It shrinks/ellipsizes before any action buttons, keeping Submit usable
 Battle details dialogs live outside the hidden landing page so their controls
 remain interactive from the editor.
 
-One account may submit once per competition. Each competition has a maximum of
-**1,000 entries**, displayed with its current count. Competition voting is
+One account may submit **5 trains + 5 subways per weekly battle** and
+**15 trains + 15 subways per monthly battle**. Existing entries count against their surface's
+allowance, including moderated entries. Existing publish throttles remain
+5 per 10 minutes and 20 per day per account/network; these are abuse protections,
+not the monthly allowance. Each competition has a maximum of **1,000 entries**
+across both surfaces, displayed with its current count. Each submitted piece has
+its own votes and permanent Share Entry link. Competition voting is
 positive-only, separate from ordinary Props/Toys, with no self-votes.
 Reports reuse the same artwork ID and existing moderation queue.
+Retries reuse the same entry number. If another tab already used it for a different
+piece, submission shows an error and keeps the current draft rather than reporting
+a false success or changing the submitted piece.
 
 ## Sharing battle entries
 
