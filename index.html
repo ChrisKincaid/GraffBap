@@ -107,7 +107,7 @@
           <button id="stencil-btn" type="button" aria-pressed="false" title="Stencils – drop a stencil on the car; press again to lift it">Stencils</button>
           <div id="sliders">
             <label title="Size ([ ]) – Brush, nib or roller size">Size <input id="brush-size" type="range" min="2" max="150" value="40" /><output for="brush-size"></output></label>
-            <label title="Hardness – Soft halo to hard edge">Hard <input id="brush-hardness" type="range" min="0" max="100" value="20" data-unit="%" /><output for="brush-hardness"></output></label>
+            <label id="edge-control" title="Edge - soft feathering to a sharp outline"><span id="edge-label">Edge</span> <input id="brush-hardness" aria-label="Edge" type="range" min="0" max="100" value="20" data-unit="%" /><output for="brush-hardness"></output></label>
             <label title="Opacity – Paint coverage per pass">Opac <input id="brush-opacity" type="range" min="5" max="100" value="80" data-unit="%" /><output for="brush-opacity"></output></label>
           </div>
         </div>

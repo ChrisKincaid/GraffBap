@@ -239,8 +239,8 @@ body {
 /* Label | track | readout, one roomy row per slider so thumbs never collide. */
 #sliders {
   display: grid;
-  grid-template-columns: 32px 120px 36px;
-  grid-auto-rows: 20px;
+  grid-template-columns: max-content 120px minmax(36px, max-content);
+  grid-auto-rows: minmax(20px, auto);
   align-items: center;
   column-gap: 8px;
   row-gap: 4px;
@@ -248,6 +248,11 @@ body {
   font-size: 11px;
   line-height: 1;
   color: #bbb;
+  white-space: nowrap;
+}
+
+#sliders label[hidden] {
+  display: none;
 }
 
 #sliders label {

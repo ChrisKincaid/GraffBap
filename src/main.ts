@@ -949,7 +949,7 @@ let stamp = document.createElement('canvas');
 
 // Fat cap: wide dusty flare. Skinny cap: tight, hard core with little overspray.
 const sprayDiameter = () => brush.size * (brush.cap === 'fat' ? 1.5 : 0.7);
-const sprayHardness = () => (brush.cap === 'fat' ? brush.hardness * 0.4 : 0.55 + brush.hardness * 0.45);
+const sprayHardness = () => 0.15 + brush.hardness * 0.85;
 
 function hexToRgb(hex: string): [number, number, number] {
   const n = parseInt(hex.slice(1), 16);
@@ -987,7 +987,7 @@ function spacing(): number {
 
 // Per-dab alpha so overlapping dabs along a stroke converge to the chosen opacity.
 function dabAlpha(): number {
-  const overlaps = Math.max(1, sprayDiameter() / spacing());
+  const overlaps = Math.max(1, sprayDiameter() * (sprayHardness() + (1 - sprayHardness()) * 0.35) / spacing());
   return 1 - Math.pow(1 - brush.opacity, 1 / overlaps);
 }
 
@@ -1000,7 +1000,6 @@ function dab(x: number, y: number): void {
 const TAU = Math.PI * 2;
 const ROLLER_THICK = 6;
 let sprayAlpha = 1;
-let rollerBounds = { minX: 0, maxX: 0, maxY: 0 };
 let rollerStreaks: CanvasPattern | null = null;
 // Radians; 0 is the classic horizontal barrel.
 let rollerAngle = 0;
@@ -1350,17 +1349,32 @@ function maskAllows(x: number, y: number): boolean {
 }
 
 // Trims the pending stroke to the stencil within the stroke's bounding box.
-function maskStrokeLayer(): void {
+function maskStrokeLayer(ctx: CanvasRenderingContext2D = strokeCtx): void {
   if (!ensureMask()) return;
   const x0 = Math.max(0, Math.floor(strokeBox.minX));
   const y0 = Math.max(0, Math.floor(strokeBox.minY));
   const x1 = Math.min(CAR_WIDTH, Math.ceil(strokeBox.maxX));
   const y1 = Math.min(CAR_HEIGHT, Math.ceil(strokeBox.maxY));
   if (x1 <= x0 || y1 <= y0) return;
-  strokeCtx.save();
-  strokeCtx.globalCompositeOperation = 'destination-in';
-  strokeCtx.drawImage(maskLayer, x0, y0, x1 - x0, y1 - y0, x0, y0, x1 - x0, y1 - y0);
-  strokeCtx.restore();
+  ctx.save();
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = 'destination-in';
+  ctx.drawImage(maskLayer, x0, y0, x1 - x0, y1 - y0, x0, y0, x1 - x0, y1 - y0);
+  ctx.restore();
+}
+
+const strokePreview = document.createElement('canvas');
+function previewStrokeLayer(): HTMLCanvasElement {
+  if (!stencil) return strokeLayer;
+  if (strokePreview.width !== CAR_WIDTH || strokePreview.height !== CAR_HEIGHT) {
+    strokePreview.width = CAR_WIDTH;
+    strokePreview.height = CAR_HEIGHT;
+  }
+  const ctx = strokePreview.getContext('2d')!;
+  ctx.clearRect(0, 0, CAR_WIDTH, CAR_HEIGHT);
+  ctx.drawImage(strokeLayer, 0, 0);
+  maskStrokeLayer(ctx);
+  return strokePreview;
 }
 
 // Kraft film overlay, cached per stencil state: sheet (or shape, when inverted) minus the cutout.
@@ -1647,7 +1661,7 @@ function markTouch(x0: number, y0: number, x1: number, y1: number): boolean {
   return hit;
 }
 
-function stampAt(x: number, y: number): void {
+function stampAt(x: number, y: number, wetMs = 0): void {
   if (!markTouch(x, y, x, y)) return;
   if (brush.tool === 'spray') {
     strokeCtx.globalAlpha = sprayAlpha;
@@ -1655,17 +1669,17 @@ function stampAt(x: number, y: number): void {
     if (brush.cap === 'fat') {
       // Dusty overspray speckle around the fat-cap halo.
       const R = stamp.width / 2;
-      strokeCtx.globalAlpha = Math.min(1, sprayAlpha * 2);
+      strokeCtx.globalAlpha = sprayAlpha * 0.25;
       strokeCtx.fillStyle = brush.color;
       for (let i = 0; i < 3; i++) {
         const a = Math.random() * TAU;
-        const dist = R * (0.7 + Math.random() * 0.6);
-        const s = 0.8 + Math.random() * 1.6;
+        const dist = R * (0.65 + Math.random() * 0.4);
+        const s = Math.min(1.2, R * 0.08) * (0.5 + Math.random() * 0.5);
         strokeCtx.fillRect(x + Math.cos(a) * dist, y + Math.sin(a) * dist, s, s);
       }
     }
     lastDabAt = performance.now();
-    addWetness(x, y);
+    addWetness(x, y, wetMs);
   } else if (brush.tool === 'roller') {
     // Extension-pole roller: barrel turned by the rotate slider; drags across it fill broad bands.
     const w = rollerWidth();
@@ -1682,9 +1696,6 @@ function stampAt(x: number, y: number): void {
       strokeCtx.fillStyle = brush.color;
     }
     strokeCtx.restore();
-    rollerBounds.minX = Math.min(rollerBounds.minX, x);
-    rollerBounds.maxX = Math.max(rollerBounds.maxX, x);
-    rollerBounds.maxY = Math.max(rollerBounds.maxY, y);
   } else if (brush.tool === 'chisel') {
     drawChiselNib(x, y);
   } else if (brush.tool === 'buff') {
@@ -1720,7 +1731,7 @@ function stampAt(x: number, y: number): void {
   }
 }
 
-function strokeTo(x: number, y: number): void {
+function strokeTo(x: number, y: number, wetMs = 0): void {
   const dx = x - lastCar.x;
   const dy = y - lastCar.y;
   const dist = Math.hypot(dx, dy);
@@ -1732,10 +1743,14 @@ function strokeTo(x: number, y: number): void {
   }
   const step = toolSpacing();
   let t = step - carry;
+  const count = Math.max(0, Math.floor((dist - t) / step) + 1);
+  if (brush.tool === 'spray') sprayWetCarry += wetMs;
+  const depositMs = brush.tool === 'spray' ? sprayWetCarry : wetMs;
   while (t <= dist) {
-    stampAt(lastCar.x + (dx * t) / dist, lastCar.y + (dy * t) / dist);
+    stampAt(lastCar.x + (dx * t) / dist, lastCar.y + (dy * t) / dist, depositMs / count);
     t += step;
   }
+  if (count > 0) sprayWetCarry = 0;
   carry = dist - (t - step);
   lastCar = { x, y };
 }
@@ -1757,22 +1772,39 @@ function commitRoller(): void {
   paintCtx.globalAlpha = strokeAlpha();
   paintCtx.drawImage(strokeLayer, 0, 0);
   paintCtx.globalAlpha = 1;
+  if (strokeTouched && brush.tool === 'roller') spawnRollerRuns();
   strokeCtx.clearRect(0, 0, CAR_WIDTH, CAR_HEIGHT);
+}
 
-  // Saturated passes occasionally weep small runs off the bottom edge.
-  if (strokeTouched && brush.tool === 'roller' && Math.random() < (brush.opacity - 0.6) * 1.5) {
-    const w = rollerWidth();
-    const span = rollerBounds.maxX - rollerBounds.minX + w;
-    const runs = 1 + Math.floor(Math.random() * 3);
-    for (let i = 0; i < runs; i++) {
+function spawnRollerRuns(): void {
+  if (Math.random() >= Math.max(0, (brush.opacity - 0.6) * 1.5)) return;
+  const x0 = Math.max(BODY.x, Math.floor(strokeBox.minX));
+  const y0 = Math.max(BODY.y, Math.floor(strokeBox.minY));
+  const w = Math.min(BODY.x + BODY.w, Math.ceil(strokeBox.maxX)) - x0;
+  const h = Math.min(BODY.y + BODY.h, Math.ceil(strokeBox.maxY)) - y0;
+  if (w <= 0 || h <= 0) return;
+  const pixels = strokeCtx.getImageData(x0, y0, w, h).data;
+  const runs = 1 + Math.floor(Math.random() * 3);
+  for (let i = 0; i < runs; i++) {
+    for (let attempt = 0; attempt < 12; attempt++) {
+      const col = Math.floor(Math.random() * w);
+      let row = h - 1;
+      while (row >= 0 && pixels[(row * w + col) * 4 + 3]! < 128) row--;
+      if (row < 0) continue;
+      const x = x0 + col + 0.5;
+      const y = y0 + row + 0.5;
+      const width = 2 + Math.random() * 2.5;
+      const left = Math.max(0, Math.floor(col - width / 2));
+      const right = Math.min(w - 1, Math.ceil(col + width / 2));
+      if (pixels[(row * w + left) * 4 + 3]! < 64 || pixels[(row * w + right) * 4 + 3]! < 64 ||
+        !maskAllows(x, y) || drips.some(drip => Math.abs(drip.x - x) < 8 && Math.abs(drip.startY - y) < 8)) continue;
       spawnDrip(
-        rollerBounds.minX - w / 2 + Math.random() * span,
-        rollerBounds.maxY + ROLLER_THICK / 2 - 1,
-        2 + Math.random() * 2.5,
+        x, y, width,
         15 + Math.random() * 45,
         brush.color,
         brush.opacity,
       );
+      break;
     }
   }
 }
@@ -1797,15 +1829,18 @@ function buildRollerStreaks(): void {
 }
 
 // ---------- Drips ----------
-const WET_CELL = 20;
+const WET_CELL = 4;
 const WET_COLS = Math.ceil(CAR_WIDTH / WET_CELL);
 const WET_ROWS = Math.ceil(CAR_HEIGHT / WET_CELL);
 const wetness = new Float32Array(WET_COLS * WET_ROWS);
-const DRIP_THRESHOLD = 3;
+const wetAt = new Float64Array(WET_COLS * WET_ROWS);
+const DRIP_THRESHOLD = 0.55;
 const MAX_DRIPS = 40;
 // Holding the can still keeps spraying at this interval, building up paint.
 const SPRAY_HOLD_INTERVAL = 30;
 let lastDabAt = 0;
+let sprayMoveAt = 0;
+let sprayWetCarry = 0;
 let lastDripTick = 0;
 
 interface Drip {
@@ -1828,9 +1863,11 @@ function spawnDrip(x: number, y: number, w0: number, len: number, color: string,
   dirty = true;
 }
 
-function addWetness(x: number, y: number): void {
-  const inc = Math.min(sprayAlpha, 0.35) * brush.opacity * (brush.cap === 'fat' ? 1.4 : 0.7);
-  const r = Math.max(WET_CELL / 2, sprayDiameter() * 0.25);
+function addWetness(x: number, y: number, elapsedMs: number): void {
+  if (elapsedMs <= 0 || brush.opacity <= 0) return;
+  const now = performance.now();
+  const inc = elapsedMs / 1000 * brush.opacity * (brush.cap === 'fat' ? 2 : 1.4);
+  const r = sprayDiameter() * Math.max(0.35, sprayHardness()) / 2;
   const c0 = Math.max(0, Math.floor((x - r) / WET_CELL));
   const c1 = Math.min(WET_COLS - 1, Math.floor((x + r) / WET_CELL));
   const r0 = Math.max(0, Math.floor((y - r) / WET_CELL));
@@ -1838,41 +1875,54 @@ function addWetness(x: number, y: number): void {
   for (let row = r0; row <= r1; row++) {
     for (let col = c0; col <= c1; col++) {
       const i = row * WET_COLS + col;
-      const v = wetness[i]! + inc;
+      const dx = Math.max(col * WET_CELL - x, 0, x - (col + 1) * WET_CELL);
+      const dy = Math.max(row * WET_CELL - y, 0, y - (row + 1) * WET_CELL);
+      const distance = Math.hypot(dx, dy);
+      if (distance >= r) continue;
+      const v = wetness[i]! * Math.exp(-Math.max(0, now - wetAt[i]!) / 3000) + inc * (1 - distance / r);
+      wetAt[i] = now;
       if (v < DRIP_THRESHOLD) {
         wetness[i] = v;
         continue;
       }
-      // Dry out the neighbourhood so a wet patch sheds a few spaced drips, not a curtain.
-      for (let rr = Math.max(0, row - 1); rr <= Math.min(WET_ROWS - 1, row + 1); rr++) {
-        for (let cc = Math.max(0, col - 2); cc <= Math.min(WET_COLS - 1, col + 2); cc++) wetness[rr * WET_COLS + cc] = 0;
+      // Drain the whole painted patch, not one cell of a large cap.
+      for (let rr = r0; rr <= r1; rr++) {
+        for (let cc = c0; cc <= c1; cc++) wetness[rr * WET_COLS + cc] = 0;
       }
+      const dripX = x + (Math.random() - 0.5) * r * 0.6;
+      const dripY = y + r * 0.5;
+      if (!maskAllows(dripX, dripY)) continue;
       spawnDrip(
-        (col + Math.random()) * WET_CELL,
-        (row + 0.8) * WET_CELL,
-        Math.min(7, Math.max(1.5, brush.size * 0.06)) * (0.7 + Math.random() * 0.6),
-        30 + Math.random() * (60 + brush.size * 1.5),
+        dripX,
+        dripY,
+        Math.min(5, sprayDiameter() * 0.1) * (0.7 + Math.random() * 0.3),
+        12 + Math.random() * Math.min(100, sprayDiameter() * 1.5),
         brush.color,
-        Math.min(1, brush.opacity * 1.15),
+        brush.opacity,
       );
+      return;
     }
   }
 }
 
 function drawDripSegment(d: Drip, ny: number): void {
   const w = d.w0 * (1 - 0.45 * ((ny - d.startY) / (d.endY - d.startY)));
+  paintCtx.save();
   paintCtx.globalAlpha = d.alpha;
   paintCtx.fillStyle = d.color;
   if (maskAllows(d.x, d.y)) paintCtx.fillRect(d.x - w / 2, d.y, w, ny - d.y);
+  paintCtx.restore();
   d.y = ny;
 }
 
 function drawDripTip(d: Drip): void {
+  paintCtx.save();
   paintCtx.globalAlpha = d.alpha;
   paintCtx.fillStyle = d.color;
   paintCtx.beginPath();
   paintCtx.arc(d.x, d.y - d.w0 * 0.1, d.w0 * 0.5, 0, TAU);
   if (maskAllows(d.x, d.y)) paintCtx.fill();
+  paintCtx.restore();
 }
 
 function updateDrips(now: number): void {
@@ -2214,9 +2264,11 @@ viewport.addEventListener('pointerdown', (e) => {
     const [x, y] = screenToCar(e.clientX, e.clientY);
     lastCar = { x, y };
     wetness.fill(0);
+    wetAt.fill(0);
+    sprayMoveAt = e.timeStamp;
+    sprayWetCarry = 0;
     if (brush.tool === 'roller') {
       buildRollerStreaks();
-      rollerBounds = { minX: x, maxX: x, maxY: y };
     }
     if (brush.tool === 'mop') {
       buildMopStamp();
@@ -2273,15 +2325,19 @@ viewport.addEventListener('pointermove', (e) => {
     const [ax, ay] = screenToCar(e.clientX, e.clientY);
     dragAdjust(ax, ay);
   } else if (mode === 'sketch') {
-    for (const ev of e.getCoalescedEvents?.() ?? [e]) sketchTo(...screenToCar(ev.clientX, ev.clientY));
+    const events = e.getCoalescedEvents?.();
+    for (const ev of events?.length ? events : [e]) sketchTo(...screenToCar(ev.clientX, ev.clientY));
   } else if (mode === 'paint') {
     if (!straightLineGesture && e.shiftKey) beginLine();
     else if (!straightLineGesture && lineOrigin) commitLine(...screenToCar(e.clientX, e.clientY));
     if (!lineOrigin && brush.tool !== 'paintball') {
-      for (const ev of e.getCoalescedEvents?.() ?? [e]) {
+      const events = e.getCoalescedEvents?.();
+      for (const ev of events?.length ? events : [e]) {
         const [x, y] = screenToCar(ev.clientX, ev.clientY);
         if (brush.tool === 'mop') updateMopFlow(x, y, ev);
-        strokeTo(x, y);
+        const elapsed = Math.min(100, Math.max(0, ev.timeStamp - sprayMoveAt));
+        sprayMoveAt = Math.max(sprayMoveAt, ev.timeStamp);
+        strokeTo(x, y, elapsed);
       }
       strokeSounds();
     }
@@ -2945,6 +3001,13 @@ straightLineToggle.addEventListener('click', () => {
 const TOOL_EXTRAS: Partial<Record<Tool, Extra>> = { stamp: 'stamp', roller: 'roller', paintball: 'paintball' };
 
 function updateToolOptions(): void {
+  const edge = document.getElementById('edge-control')!;
+  const rate = brush.tool === 'paintball';
+  edge.hidden = !['spray', 'buff', 'paintball'].includes(brush.tool);
+  const label = rate ? 'Fire Rate' : 'Edge';
+  document.getElementById('edge-label')!.textContent = label;
+  document.getElementById('brush-hardness')!.setAttribute('aria-label', label);
+  edge.title = rate ? 'Fire Rate - automatic paintball shots per second' : 'Edge - soft feathering to a sharp outline';
   if (brush.tool === 'stamp') {
     stampPos = viewCentre();
     stampSizeInput.value = '50';
@@ -3076,7 +3139,7 @@ const fireBtns = document.querySelectorAll<HTMLButtonElement>('#paintball-option
 const fireRate = document.getElementById('fire-rate')!;
 function updateFireUI(): void {
   fireBtns.forEach((b) => b.setAttribute('aria-pressed', String((b.dataset.fire === 'auto') === paintballAuto)));
-  fireRate.textContent = paintballAuto ? `${Math.round(1000 / paintballInterval())} shots/sec · Hard sets speed` : 'One tap, one shot';
+  fireRate.textContent = paintballAuto ? `${Math.round(1000 / paintballInterval())} shots/sec · Fire Rate sets speed` : 'One tap, one shot';
 }
 fireBtns.forEach((b) =>
   b.addEventListener('click', () => {
@@ -6249,7 +6312,9 @@ function render(): void {
     dirty = true;
   }
   if (mode === 'paint' && brush.tool === 'spray' && !lineOrigin && now - lastDabAt >= SPRAY_HOLD_INTERVAL) {
-    stampAt(lastCar.x, lastCar.y);
+    stampAt(lastCar.x, lastCar.y, Math.min(100, now - lastDabAt));
+    sprayMoveAt = now;
+    sprayWetCarry = 0;
     dirty = true;
   }
   if (mode === 'paint' && brush.tool === 'mop' && !lineOrigin && now - lastDabAt >= MOP_HOLD_INTERVAL) {
@@ -6274,8 +6339,7 @@ function render(): void {
     viewCtx.drawImage(paintLayer, 0, 0);
     if (mode === 'paint' && usesStrokeLayer()) {
       viewCtx.globalAlpha = strokeAlpha();
-      maskStrokeLayer();
-      viewCtx.drawImage(strokeLayer, 0, 0);
+      viewCtx.drawImage(previewStrokeLayer(), 0, 0);
       viewCtx.globalAlpha = 1;
     }
     if (glazes.length) {
