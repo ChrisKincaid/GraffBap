@@ -113,22 +113,22 @@ export interface VoteResult {
   promoted: boolean;
 }
 
-// One vote per profile per car; switching moves the vote. HoF promotion happens in the same transaction.
-export async function voteRegistryCar(id: string, kind: 'props' | 'toy'): Promise<VoteResult> {
+// One vote per profile per car; switching moves the vote, 'none' removes it. HoF promotion happens in the same transaction.
+export async function voteRegistryCar(id: string, kind: 'props' | 'toy' | 'none'): Promise<VoteResult> {
   return voteTarget<RegistryCar>(id, kind, 'artwork');
 }
 
-export async function votePromoAd(id: string, kind: 'props' | 'toy'): Promise<{
+export async function votePromoAd(id: string, kind: 'props' | 'toy' | 'none'): Promise<{
   car: PromoAd; already: boolean; promoted: boolean;
 }> {
   return voteTarget<PromoAd>(id, kind, 'promo');
 }
 
-async function voteTarget<T>(id: string, kind: 'props' | 'toy', target: 'artwork' | 'promo'): Promise<{
+async function voteTarget<T>(id: string, kind: 'props' | 'toy' | 'none', target: 'artwork' | 'promo'): Promise<{
   car: T; already: boolean; promoted: boolean;
 }> {
   requireAbuseProtection();
-  return (await httpsCallable<{ id: string; kind: 'props' | 'toy'; target: 'artwork' | 'promo' }, {
+  return (await httpsCallable<{ id: string; kind: 'props' | 'toy' | 'none'; target: 'artwork' | 'promo' }, {
     car: T; already: boolean; promoted: boolean;
   }>(
     graffitiFunctions, 'graffitiVote',

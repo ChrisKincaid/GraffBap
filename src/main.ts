@@ -4558,7 +4558,26 @@ function myVote(key: string): VoteKind | null {
 }
 
 // Server votes in flight, keyed by entryKey; shown immediately and settled or rolled back on reply.
-const pendingVotes = new Map<string, VoteKind>();
+// 'none' means the user's existing rating is being removed.
+type VoteTarget = VoteKind | 'none';
+const pendingVotes = new Map<string, VoteTarget>();
+
+function saveVoteLocally(uid: string, e: RollEntry, target: VoteTarget): void {
+  const votes = readVotes();
+  const key = `${uid}|${entryKey(e)}`;
+  if (target === 'none') delete votes[key];
+  else votes[key] = target;
+  try {
+    localStorage.setItem(VOTES_KEY, JSON.stringify(votes));
+  } catch (err) {
+    console.warn('Rating saved, but this browser could not remember it locally.', err);
+  }
+}
+
+function voteToast(target: VoteTarget, already: boolean): void {
+  if (target === 'none') showToast(already ? 'Your rating was already removed.' : 'Rating removed.');
+  else if (already) showToast(target === 'props' ? 'You already dropped props on this car.' : 'You already called this one whack.');
+}
 
 function renderRating(e: RollEntry, ui: RatingUI): void {
   ui.propsBtn.hidden = ui.toyBtn.hidden = !!e.reg?.competitionId;
@@ -4576,17 +4595,20 @@ function renderRating(e: RollEntry, ui: RatingUI): void {
     if (saved === 'props') p = Math.max(0, p - 1);
     if (saved === 'toy') t = Math.max(0, t - 1);
     if (pending === 'props') p++;
-    else t++;
+    else if (pending === 'toy') t++;
   }
   const total = p + t;
   ui.props.textContent = String(p);
   ui.toys.textContent = String(t);
   ui.approval.textContent = total ? `${Math.round((p / total) * 100)}% approval · ${total} vote${total === 1 ? '' : 's'}` : 'No votes yet';
-  const mine = pending ?? saved;
+  const mine = pending ? (pending === 'none' ? null : pending) : saved;
+  const busy = pending === 'none' ? saved : pending;
   ui.propsBtn.setAttribute('aria-pressed', String(mine === 'props'));
   ui.toyBtn.setAttribute('aria-pressed', String(mine === 'toy'));
-  ui.propsBtn.setAttribute('aria-busy', String(pending === 'props'));
-  ui.toyBtn.setAttribute('aria-busy', String(pending === 'toy'));
+  ui.propsBtn.setAttribute('aria-busy', String(busy === 'props'));
+  ui.toyBtn.setAttribute('aria-busy', String(busy === 'toy'));
+  ui.propsBtn.title = mine === 'props' ? 'Tap again to remove your props' : 'Give Props';
+  ui.toyBtn.title = mine === 'toy' ? 'Tap again to remove your whack vote' : 'Whack – vote this piece down';
 }
 
 function renderVoteEverywhere(e: RollEntry): void {
@@ -4597,15 +4619,17 @@ function renderVoteEverywhere(e: RollEntry): void {
 }
 
 // Returns false when a vote for this car is already on its way.
-function beginPendingVote(e: RollEntry, kind: VoteKind): boolean {
+function beginPendingVote(e: RollEntry, kind: VoteTarget): boolean {
   const key = entryKey(e);
   if (pendingVotes.has(key)) return false;
   pendingVotes.set(key, kind);
-  if (myVote(key) !== kind && !roll?.showcase) (kind === 'props' ? playPuff : playPeel)();
+  if (kind !== 'none' && myVote(key) !== kind && !roll?.showcase) (kind === 'props' ? playPuff : playPeel)();
   renderVoteEverywhere(e);
+  const popped = kind === 'none' ? myVote(key) : kind;
+  if (!popped) return true;
   const card = cardCar >= 0 ? cardEntryAt(cardCar) : null;
-  if (card && entryKey(card) === key) popEls(kind === 'props' ? ccPropsBtn : ccToyBtn);
-  if (benchEntry && entryKey(benchEntry) === key) popEls(kind === 'props' ? benchPropsBtn : benchToyBtn);
+  if (card && entryKey(card) === key) popEls(popped === 'props' ? ccPropsBtn : ccToyBtn);
+  if (benchEntry && entryKey(benchEntry) === key) popEls(popped === 'props' ? benchPropsBtn : benchToyBtn);
   return true;
 }
 
@@ -4614,20 +4638,23 @@ function endPendingVote(e: RollEntry): void {
   renderVoteEverywhere(e);
 }
 
-// One vote per BoxBap.com profile per car (props OR toy); switching moves the vote. Recorded on this device.
-function castVote(e: RollEntry, kind: VoteKind, done: () => void): void {
+// One vote per BoxBap.com profile per car (props OR toy); switching moves the vote and
+// tapping your current choice again removes it. Recorded on this device.
+function castVote(e: RollEntry, kind: VoteKind, done: () => void, afterSignIn = false): void {
   if (e.reg?.competitionId) {
     showToast('Use the competition vote button. Competition entries have no downvotes.');
     return;
   }
   if (!currentUser || currentUser.isAnonymous) {
-    requireAuth(() => castVote(e, kind, done), true);
+    requireAuth(() => castVote(e, kind, done, true), true);
     return;
   }
+  // A vote resumed after signing in never removes an earlier one.
+  const target: VoteTarget = !afterSignIn && myVote(entryKey(e)) === kind ? 'none' : kind;
   if (e.isPromo && e.id) {
     const uid = currentUser.uid;
-    if (!beginPendingVote(e, kind)) return;
-    void votePromoAd(e.id, kind).then(result => {
+    if (!beginPendingVote(e, target)) return;
+    void votePromoAd(e.id, target).then(result => {
       pendingVotes.delete(entryKey(e));
       for (const entry of [...(roll?.entries ?? []), ...subwayReel.entries, e, ...(benchEntry ? [benchEntry] : [])]) {
         if (entry.isPromo && entry.id === e.id) {
@@ -4635,14 +4662,8 @@ function castVote(e: RollEntry, kind: VoteKind, done: () => void): void {
           entry.props = result.car.props ?? 0;
         }
       }
-      const votes = readVotes();
-      votes[`${uid}|${entryKey(e)}`] = kind;
-      try {
-        localStorage.setItem(VOTES_KEY, JSON.stringify(votes));
-      } catch (err) {
-        console.warn('Rating saved, but this browser could not remember it locally.', err);
-      }
-      if (result.already) showToast(kind === 'props' ? 'You already dropped props on this car.' : 'You already called this one whack.');
+      saveVoteLocally(uid, e, target);
+      voteToast(target, result.already);
       done();
       refreshCard();
       if (benchEntry?.isPromo && benchEntry.id === e.id) renderRating(benchEntry, benchRatingUI());
@@ -4653,33 +4674,26 @@ function castVote(e: RollEntry, kind: VoteKind, done: () => void): void {
     });
     return;
   }
-  if (e.reg) return castRegistryVote(e, kind, done);
+  if (e.reg) return castRegistryVote(e, target, done);
   const key = entryKey(e);
-  const votes = readVotes();
-  const voteKey = `${currentUser.uid}|${key}`;
   const prev = myVote(key);
-  if (prev === kind) {
-    showToast(kind === 'props' ? 'You already dropped props on this car.' : 'You already called this one whack.');
-    done();
-    return;
-  }
   const m = readMeta()[key] ?? {};
   let props = m.props ?? 0;
   let toys = m.toys ?? 0;
   if (prev === 'props') props = Math.max(0, props - 1);
   if (prev === 'toy') toys = Math.max(0, toys - 1);
-  if (kind === 'props') props++;
-  else toys++;
+  if (target === 'props') props++;
+  else if (target === 'toy') toys++;
   updateMeta(key, { props, toys });
-  votes[voteKey] = kind;
-  localStorage.setItem(VOTES_KEY, JSON.stringify(votes));
-  if (!roll?.showcase) (kind === 'props' ? playPuff : playPeel)();
+  saveVoteLocally(currentUser.uid, e, target);
+  if (target !== 'none' && !roll?.showcase) (target === 'props' ? playPuff : playPeel)();
+  voteToast(target, false);
   done();
   if (shouldBuff(e)) buffEntry(e);
 }
 
 // Registry cars vote through Firestore so props, toys and HoF status are shared by every writer.
-function castRegistryVote(e: RollEntry, kind: VoteKind, done: () => void): void {
+function castRegistryVote(e: RollEntry, kind: VoteTarget, done: () => void): void {
   const reg = e.reg!;
   const uid = currentUser!.uid;
   if (!beginPendingVote(e, kind)) return;
@@ -4688,14 +4702,8 @@ function castRegistryVote(e: RollEntry, kind: VoteKind, done: () => void): void 
       pendingVotes.delete(entryKey(e));
       e.reg = r.car;
       e.props = r.car.props;
-      const votes = readVotes();
-      votes[`${uid}|${entryKey(e)}`] = kind;
-      try {
-        localStorage.setItem(VOTES_KEY, JSON.stringify(votes));
-      } catch (err) {
-        console.warn('Rating saved, but this browser could not remember it locally.', err);
-      }
-      if (r.already) showToast(kind === 'props' ? 'You already dropped props on this car.' : 'You already called this one whack.');
+      saveVoteLocally(uid, e, kind);
+      voteToast(kind, r.already);
       if (r.promoted) {
         showToast(`Hall of Fame – ${e.writer}'s piece just got inducted.`, 4000);
       }
@@ -7001,9 +7009,10 @@ function renderEntryVote(reg: RegistryCar, button: HTMLButtonElement, status: HT
   status.textContent =
     `${competition?.title ?? 'Battle'} · ${reg.competitionVotes ?? 0} votes · ${open ? 'Voting open' :
       !competitionsLoaded ? 'Checking battle...' : competition?.status === 'open' ? 'Results pending' : 'Voting closed'}`;
-  button.textContent = mine ? 'Your Entry' : voted ? 'Voted' : open
-    ? viewingPast ? 'View Current to Vote' : 'Vote for This Entry' : 'Voting Closed';
-  button.disabled = !open || viewingPast || mine || voted || competitionVoteBusy === reg.id ||
+  button.textContent = mine ? 'Your Entry' : !open ? 'Voting Closed' : viewingPast ? 'View Current to Vote'
+    : voted ? 'Remove My Vote' : 'Vote for This Entry';
+  button.classList.toggle('is-voted', voted && open && !viewingPast && !mine);
+  button.disabled = !open || viewingPast || mine || competitionVoteBusy === reg.id ||
     !['departed', 'hall_of_fame', 'museum'].includes(reg.status);
 }
 
@@ -7140,30 +7149,34 @@ document.getElementById('shared-entry-report')!.addEventListener('click', () => 
   if (sharedEntry) reportEntry(sharedEntry, 'top');
 });
 
-function castCompetitionVote(entry: RollEntry | null = cardEntryAt(cardCar), shared = false): void {
+function castCompetitionVote(entry: RollEntry | null = cardEntryAt(cardCar), shared = false, afterSignIn = false): void {
   if (!entry?.reg?.competitionId) return;
   const id = entry.reg.id;
   if (shared && sharedEntry?.reg?.id !== id) return;
   const competition = competitions.find(item => item.id === entry.reg?.competitionId);
   if (!competition || !competitionOpen(competition) ||
       !['departed', 'hall_of_fame', 'museum'].includes(entry.reg.status)) return;
-  if (!signedIn()) return requireAuth(() => castCompetitionVote(entry, shared), true);
+  if (!signedIn()) return requireAuth(() => castCompetitionVote(entry, shared, true), true);
   const uid = currentUser!.uid;
   if (entry.reg.writerUid === uid) return;
   if (competitionVoteBusy) return;
+  const voteKey = `competition-vote/${uid}/${id}`;
+  const remove = !afterSignIn && localStorage.getItem(voteKey) === 'yes';
   competitionVoteBusy = id;
   refreshCard();
   renderSharedEntry();
-  void voteCompetition(id).then(result => {
+  void voteCompetition(id, remove).then(result => {
     for (const item of [...roll?.entries ?? [], ...subwayReel.entries, entry, ...(sharedEntry ? [sharedEntry] : [])]) {
       if (item.reg?.id === id) item.reg.competitionVotes = result.votes;
     }
     try {
-      localStorage.setItem(`competition-vote/${uid}/${id}`, 'yes');
+      if (remove) localStorage.removeItem(voteKey);
+      else localStorage.setItem(voteKey, 'yes');
     } catch (error) {
       console.warn('Vote recorded, but this browser could not remember it locally.', error);
     }
-    showToast(result.already ? 'You already voted for this entry.' : 'Competition vote recorded.');
+    showToast(remove ? (result.already ? 'Your vote was already removed.' : 'Vote removed.')
+      : result.already ? 'You already voted for this entry.' : 'Competition vote recorded.');
   }).catch(error => {
     console.error('Competition vote failed', error);
     showToast(actionError(error), 6000);

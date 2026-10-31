@@ -728,6 +728,10 @@ body.competitions .term-status {
   font-size: 9px;
   font-weight: 400;
 }
+#cc-competition-vote.is-voted {
+  color: #111;
+  background: #ffd200;
+}
 #competition-message {
   position: fixed;
   bottom: 32px;
@@ -4507,7 +4511,6 @@ body.rollby #toolbar {
   color: #ffd200;
   font: 400 15px/1 'Stardos Stencil', Impact, sans-serif;
   letter-spacing: 0.06em;
-  text-transform: uppercase;
 }
 
 #cw-count {

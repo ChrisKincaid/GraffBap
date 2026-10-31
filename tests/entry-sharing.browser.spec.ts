@@ -109,12 +109,12 @@ test('guest can cancel sign-in, then sign in and vote on this exact entry withou
   await login(page, email);
   const request = await voted;
   expect(request.postDataJSON().data.id).toBe(weekly);
-  await expect(page.locator('#shared-entry-vote')).toHaveText('Voted');
-  await expect(page.locator('#shared-entry-vote')).toBeDisabled();
+  await expect(page.locator('#shared-entry-vote')).toHaveText('Remove My Vote');
+  await expect(page.locator('#shared-entry-vote')).toBeEnabled();
   await expect(page.locator('#shared-entry-writer')).toHaveText(writer!);
   await expect(page.locator('#shared-entry-preview')).toBeVisible();
   await page.reload();
-  await expect(page.locator('#shared-entry-vote')).toHaveText('Voted');
+  await expect(page.locator('#shared-entry-vote')).toHaveText('Remove My Vote');
 });
 
 test('owner and archived entry links show artwork but cannot vote; reporting remains guest-friendly', async ({ page }) => {

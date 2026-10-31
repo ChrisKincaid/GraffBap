@@ -331,8 +331,12 @@ test('signed-in competition voting is positive-only and reporting reuses existin
   const vote = page.locator('#cc-competition-vote');
   await expect(vote).toBeEnabled();
   await vote.click();
-  await expect(vote).toHaveText('Voted');
-  await expect(vote).toBeDisabled();
+  await expect(vote).toHaveText('Remove My Vote');
+  await expect(vote).toBeEnabled();
+  await vote.click();
+  await expect(vote).toHaveText('Vote for This Entry');
+  await vote.click();
+  await expect(vote).toHaveText('Remove My Vote');
   await page.locator('#cc-report').click();
   await expect(page.locator('#report-dialog')).toBeVisible();
   await page.locator('#report-reason').selectOption('spam');

@@ -147,11 +147,11 @@ export function submitCompetition(
   )({ ...artwork, competitionId, entryIndex }).then(result => result.data);
 }
 
-export function voteCompetition(id: string): Promise<{ votes: number; already: boolean }> {
+export function voteCompetition(id: string, remove = false): Promise<{ votes: number; already: boolean }> {
   requireAbuseProtection();
-  return httpsCallable<{ id: string }, { votes: number; already: boolean }>(
+  return httpsCallable<{ id: string; remove: boolean }, { votes: number; already: boolean }>(
     graffitiFunctions, 'competitionVote',
-  )({ id }).then(result => result.data);
+  )({ id, remove }).then(result => result.data);
 }
 
 export const competitionOpen = (competition: Competition, now = Date.now()): boolean =>
