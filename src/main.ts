@@ -4291,6 +4291,8 @@ function showCard(i: number, src: 'top' | 'sub' = 'top'): void {
     visitPromoBtn.onclick = null;
     carCard.style.left = '';
     carCard.style.top = '';
+    carCard.style.bottom = '';
+    delete carCard.dataset.dock;
     return;
   }
   positionCarCard();
@@ -4381,7 +4383,7 @@ function renderCard(e: RollEntry): void {
 
 // The full-screen phone panel shows the car itself, so there's no guessing which one you tapped.
 function drawCardPreview(e: RollEntry): void {
-  if (!mobileCard()) return;
+  if (!mobileCard() || carCard.dataset.dock) return;
   const w = Math.max(1, Math.round(ccPreview.clientWidth || carCard.clientWidth - 28));
   const scale = w / CAR_WIDTH;
   const h = Math.max(1, Math.round(EXPORT_CROP.h * scale));
@@ -4413,14 +4415,14 @@ const mobileCard = () => window.matchMedia('(max-width: 700px)').matches;
 function positionCarCard(): void {
   if (cardCar < 0 || carCard.hidden) return;
   const wallEl = commentWall.element;
-  if (mobileCard()) {
-    carCard.style.left = '';
-    carCard.style.top = '';
-    wallEl.style.left = wallEl.style.top = wallEl.style.height = '';
-    return;
-  }
   const frame = document.getElementById(cardSrc === 'sub' ? 'subway-frame' : 'showcase-frame');
   const track = frame?.querySelector('.reel-track');
+  if (mobileCard()) {
+    dockMobileCard(track?.getBoundingClientRect() ?? null, wallEl);
+    return;
+  }
+  carCard.style.bottom = '';
+  delete carCard.dataset.dock;
   if (!track) return;
   const bounds = track.getBoundingClientRect();
   const top = Math.max(12, Math.min(bounds.top, innerHeight - carCard.offsetHeight - 12));
@@ -4431,6 +4433,34 @@ function positionCarCard(): void {
     wallEl.style.left = `${bounds.left - wallEl.offsetWidth}px`;
     wallEl.style.top = `${top}px`;
     wallEl.style.height = `${carCard.offsetHeight}px`;
+  }
+}
+
+// Phones keep the selected car visible, paused in its reel, and dock the panel over the other half:
+// train (top reel) -> panel below it; subway (bottom reel) -> panel above it.
+const MOBILE_DOCK_MIN = 240;
+function dockMobileCard(track: DOMRect | null, wallEl: HTMLElement): void {
+  carCard.style.left = '';
+  wallEl.style.left = wallEl.style.height = '';
+  let top = 0;
+  let bottom = 0;
+  let dock: 'top' | 'bottom' | '' = '';
+  if (track && cardSrc === 'top' && innerHeight - track.bottom >= MOBILE_DOCK_MIN) {
+    top = Math.round(track.bottom);
+    dock = 'bottom';
+  } else if (track && cardSrc === 'sub' && track.top >= MOBILE_DOCK_MIN) {
+    bottom = Math.round(innerHeight - track.top);
+    dock = 'top';
+  }
+  // Too little room left to dock: fall back to the full-screen panel with its own car preview.
+  const was = carCard.dataset.dock ?? '';
+  if (dock) carCard.dataset.dock = dock;
+  else delete carCard.dataset.dock;
+  carCard.style.top = wallEl.style.top = `${top}px`;
+  carCard.style.bottom = wallEl.style.bottom = `${bottom}px`;
+  if (was && !dock) {
+    const e = cardEntryAt(cardCar);
+    if (e) drawCardPreview(e);
   }
 }
 

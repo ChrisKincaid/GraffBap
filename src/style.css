@@ -2378,6 +2378,39 @@ body.showcase .dispatch {
     border-radius: 8px;
     font-size: 14px;
   }
+
+  /* Docked over the other reel: the real car stays visible, so no preview copy. */
+  #car-card[data-dock] {
+    padding: 12px 14px 14px;
+  }
+
+  #car-card[data-dock='bottom'] {
+    border-top: 2px solid #ffd200;
+  }
+
+  #car-card[data-dock='top'] {
+    border-bottom: 2px solid #ffd200;
+  }
+
+  #car-card[data-dock] .cc-preview {
+    display: none;
+  }
+
+  #car-card[data-dock] .cc-nav {
+    margin-right: 50px;
+  }
+
+  /* In-flow close button that shares the nav row, so the whole block can hug the selected car. */
+  #car-card[data-dock] .cc-close {
+    position: static;
+    flex: none;
+    align-self: flex-end;
+    margin-bottom: -42px;
+  }
+
+  #car-card[data-dock='top'] .cc-close {
+    margin-top: auto;
+  }
 }
 
 #car-card[hidden] {
