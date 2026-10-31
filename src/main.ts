@@ -3702,7 +3702,7 @@ function enterRollBy(showcase = false, entries: RollEntry[] | null = null): void
   const token = ++rollToken;
   const L = activeRollLayout(showcase);
   roll = {
-    x: showcase ? (entries?.length ?? CAR_COUNT) * CAR_WIDTH : -L.W / L.scale,
+    x: showcase ? (entries?.length ?? CAR_COUNT) * CAR_WIDTH + ENGINE_W : -L.W / L.scale,
     speedIdx: 1,
     paused: false,
     lastT: performance.now(),
@@ -3798,6 +3798,327 @@ function drawKnuckle(ctx: CanvasRenderingContext2D, x: number): void {
   ctx.stroke();
 }
 
+// ---------- Gallery engines: a decorative lead unit whose side names the line-up it pulls ----------
+const ENGINE_W = 2900;
+const SUB_CAB_W = 2800;
+const ENGINE_CACHE_SCALE = 0.5;
+const SIGN_FONT = '"Stardos Stencil", Impact, sans-serif';
+const SIGN_SUB_FONT = 'ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace';
+type EngineSign = { main: string; sub: string };
+const engineCache = new Map<string, HTMLCanvasElement>();
+// Signs drawn before the stencil face arrives would keep the fallback font, so redraw once it lands.
+void document.fonts?.load(`700 100px ${SIGN_FONT}`).then(() => engineCache.clear()).catch(() => undefined);
+
+function engineSign(id: ReelId): EngineSign {
+  // The sign tells visitors this is real people's art and invites them to paint too.
+  if (myWork[id]) return { main: 'YOUR WORK', sub: 'THANKS FOR PAINTING WITH US' };
+  const kind = id === 'top' ? 'MONTHLY' : 'WEEKLY';
+  if (allTimeCompetitionFeed(id)) return { main: `ALL-TIME ${kind} TOP 500`, sub: 'BEST BATTLE ART FROM OUR ARTISTS' };
+  const competition = selectedCompetition(id);
+  if (competition) {
+    const monthly = competition.kind === 'monthly';
+    const sub = archivesView && competitionView
+      ? `${monthly ? 'MONTHLY' : 'WEEKLY'} BATTLE · ${new Date(competition.opensAt).toLocaleDateString(undefined, {
+        timeZone: 'America/Chicago', month: 'short', year: 'numeric', ...(monthly ? {} : { day: 'numeric' }),
+      }).toUpperCase()}`
+      : `${monthly ? 'THIS MONTH\u2019S' : 'THIS WEEK\u2019S'} BATTLE · VOTE OR ENTER YOUR OWN`;
+    return { main: competition.title.toUpperCase(), sub };
+  }
+  if (competitionView) return { main: `${kind} BATTLE`, sub: archivesView ? 'NO PAST BATTLES YET' : 'NO BATTLE OPEN' };
+  if (feedSelection[id] === 'ads') return { main: 'SPONSORED', sub: 'ADS ONLY' };
+  return { main: id === 'top' ? 'MAIN YARD TRAIN' : 'MAIN YARD SUBWAY', sub: 'EVERY CAR IS REAL USER ART · PAINT ONE TOO' };
+}
+
+// Shrinks the font until the text fits, then trims with an ellipsis as a last resort.
+function fitSignText(ctx: CanvasRenderingContext2D, text: string, maxW: number, size: number, min: number, family: string): string {
+  let s = size;
+  ctx.font = `700 ${s}px ${family}`;
+  while (s > min && ctx.measureText(text).width > maxW) {
+    s -= 4;
+    ctx.font = `700 ${s}px ${family}`;
+  }
+  let out = text;
+  while (out.length > 1 && ctx.measureText(out).width > maxW) out = `${out.slice(0, -2).trimEnd()}\u2026`;
+  return out;
+}
+
+function drawSignPanel(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, sign: EngineSign, arrowLeft: boolean): void {
+  ctx.fillStyle = '#0c0d0f';
+  ctx.fillRect(x, y, w, h);
+  ctx.strokeStyle = '#ffd200';
+  ctx.lineWidth = 12;
+  ctx.strokeRect(x + 14, y + 14, w - 28, h - 28);
+  // The arrow points back along the train at the cars this unit is pulling.
+  const aw = Math.min(170, h * 0.5);
+  const ax = arrowLeft ? x + 60 : x + w - 60 - aw;
+  const ay = y + h / 2;
+  ctx.fillStyle = '#ffd200';
+  ctx.beginPath();
+  if (arrowLeft) {
+    ctx.moveTo(ax, ay);
+    ctx.lineTo(ax + aw * 0.55, ay - aw * 0.5);
+    ctx.lineTo(ax + aw * 0.55, ay - aw * 0.2);
+    ctx.lineTo(ax + aw, ay - aw * 0.2);
+    ctx.lineTo(ax + aw, ay + aw * 0.2);
+    ctx.lineTo(ax + aw * 0.55, ay + aw * 0.2);
+    ctx.lineTo(ax + aw * 0.55, ay + aw * 0.5);
+  } else {
+    ctx.moveTo(ax + aw, ay);
+    ctx.lineTo(ax + aw * 0.45, ay - aw * 0.5);
+    ctx.lineTo(ax + aw * 0.45, ay - aw * 0.2);
+    ctx.lineTo(ax, ay - aw * 0.2);
+    ctx.lineTo(ax, ay + aw * 0.2);
+    ctx.lineTo(ax + aw * 0.45, ay + aw * 0.2);
+    ctx.lineTo(ax + aw * 0.45, ay + aw * 0.5);
+  }
+  ctx.closePath();
+  ctx.fill();
+
+  const tx = arrowLeft ? ax + aw + 50 : x + 70;
+  const tw = (arrowLeft ? x + w - 70 : ax - 50) - tx;
+  const cx = tx + tw / 2;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillStyle = '#ffffff';
+  const main = fitSignText(ctx, sign.main, tw, Math.round(h * 0.42), 56, SIGN_FONT);
+  ctx.fillText(main, cx, y + h * 0.58);
+  ctx.fillStyle = '#ffd200';
+  const sub = fitSignText(ctx, sign.sub, tw, Math.round(h * 0.17), 30, SIGN_SUB_FONT);
+  ctx.fillText(sub, cx, y + h * 0.82);
+  ctx.textAlign = 'start';
+}
+
+function drawWheelSet(ctx: CanvasRenderingContext2D, cx: number, spacing: number, count: number, r: number): void {
+  ctx.fillStyle = '#1a1a1a';
+  ctx.fillRect(cx - spacing * (count - 1) / 2 - r - 40, 990, spacing * (count - 1) + 2 * r + 80, 70);
+  for (let k = 0; k < count; k++) {
+    const wx = cx - spacing * (count - 1) / 2 + k * spacing;
+    ctx.fillStyle = '#111';
+    ctx.beginPath();
+    ctx.arc(wx, 1070, r, 0, TAU);
+    ctx.fill();
+    ctx.strokeStyle = '#3b3b3b';
+    ctx.lineWidth = 8;
+    ctx.stroke();
+    ctx.fillStyle = '#2a2a2a';
+    ctx.beginPath();
+    ctx.arc(wx, 1070, r * 0.3, 0, TAU);
+    ctx.fill();
+  }
+  ctx.fillStyle = '#242424';
+  ctx.fillRect(cx - spacing * (count - 1) / 2 - 20, 1030, spacing * (count - 1) + 40, 34);
+}
+
+// Freight road unit facing right: long hood at the rear, cab and short nose up front.
+function drawFreightEngine(ctx: CanvasRenderingContext2D, sign: EngineSign): void {
+  const body = '#353d47';
+  // Rear coupler.
+  ctx.fillStyle = '#1e1e1e';
+  ctx.fillRect(20, 968, 80, 26);
+  ctx.fillRect(-5, 955, 40, 52);
+
+  drawWheelSet(ctx, 560, 180, 3, 68);
+  drawWheelSet(ctx, 2260, 180, 3, 68);
+  // Fuel tank between the trucks.
+  ctx.fillStyle = '#2b2f34';
+  ctx.beginPath();
+  ctx.roundRect(980, 935, 820, 100, 46);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.08)';
+  ctx.fillRect(1010, 950, 760, 10);
+
+  // Deck and walkway.
+  ctx.fillStyle = '#16181b';
+  ctx.fillRect(90, 880, 2680, 60);
+  ctx.fillStyle = '#ffd200';
+  ctx.fillRect(90, 892, 2680, 16);
+
+  // Long hood.
+  const hood = ctx.createLinearGradient(0, 400, 0, 880);
+  hood.addColorStop(0, '#46505b');
+  hood.addColorStop(1, body);
+  ctx.fillStyle = hood;
+  ctx.fillRect(140, 400, 1860, 480);
+  ctx.fillStyle = '#1a1e22';
+  for (let x = 180; x < 1960; x += 300) ctx.fillRect(x, 410, 6, 460);
+  // Radiator grille, dynamic brake blister and exhaust stack.
+  ctx.fillStyle = '#15181b';
+  ctx.fillRect(160, 420, 70, 440);
+  ctx.fillStyle = '#2c3137';
+  ctx.fillRect(700, 362, 520, 40);
+  ctx.fillStyle = '#121416';
+  ctx.fillRect(1380, 352, 90, 50);
+
+  drawSignPanel(ctx, 260, 420, 1700, 330, sign, true);
+
+  // Cab.
+  ctx.fillStyle = body;
+  ctx.fillRect(2000, 250, 470, 630);
+  ctx.fillStyle = '#3a4048';
+  ctx.fillRect(1985, 222, 500, 36);
+  const glass = ctx.createLinearGradient(2060, 300, 2400, 540);
+  glass.addColorStop(0, '#2b333c');
+  glass.addColorStop(0.5, '#141a20');
+  glass.addColorStop(1, '#3a4450');
+  ctx.fillStyle = glass;
+  ctx.fillRect(2060, 300, 340, 230);
+  ctx.strokeStyle = '#0c0d0f';
+  ctx.lineWidth = 10;
+  ctx.strokeRect(2060, 300, 340, 230);
+  ctx.fillStyle = '#ffd200';
+  ctx.font = `700 96px ${SIGN_FONT}`;
+  ctx.textAlign = 'center';
+  ctx.fillText('GB 01', 2235, 700);
+  ctx.textAlign = 'start';
+
+  // Short nose, headlight and pilot.
+  ctx.fillStyle = body;
+  ctx.beginPath();
+  ctx.moveTo(2470, 560);
+  ctx.lineTo(2680, 600);
+  ctx.lineTo(2730, 680);
+  ctx.lineTo(2730, 880);
+  ctx.lineTo(2470, 880);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = '#fff4b0';
+  ctx.beginPath();
+  ctx.arc(2722, 640, 20, 0, TAU);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(255,240,160,0.35)';
+  ctx.beginPath();
+  ctx.arc(2722, 640, 44, 0, TAU);
+  ctx.fill();
+  ctx.fillStyle = '#ffd200';
+  ctx.beginPath();
+  ctx.moveTo(2770, 880);
+  ctx.lineTo(2850, 1000);
+  ctx.lineTo(2770, 1020);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = '#1e1e1e';
+  ctx.fillRect(2770, 960, 110, 30);
+
+  // Handrails along the walkway sit in front of the hood.
+  ctx.strokeStyle = '#c9a400';
+  ctx.lineWidth = 8;
+  ctx.beginPath();
+  ctx.moveTo(110, 790);
+  ctx.lineTo(1990, 790);
+  for (let x = 110; x <= 1990; x += 235) {
+    ctx.moveTo(x, 790);
+    ctx.lineTo(x, 880);
+  }
+  ctx.moveTo(2480, 790);
+  ctx.lineTo(2760, 790);
+  ctx.moveTo(2760, 790);
+  ctx.lineTo(2760, 880);
+  ctx.stroke();
+}
+
+// Stainless driver's cab car facing left, matching the subway bodies.
+function drawSubwayCab(ctx: CanvasRenderingContext2D, sign: EngineSign): void {
+  const right = SUB_CAB_W - 90;
+  const top = BODY.y;
+  const bottom = BODY.y + BODY.h;
+  ctx.fillStyle = '#17181a';
+  ctx.fillRect(130, bottom, right - 170, 36);
+  for (const cx of [560, SUB_CAB_W - 560]) {
+    ctx.fillStyle = '#1a1a1a';
+    ctx.fillRect(cx - 220, bottom + 36, 440, 56);
+    for (const wx of [cx - 130, cx + 130]) {
+      ctx.fillStyle = '#111';
+      ctx.beginPath();
+      ctx.arc(wx, 1070, 56, 0, TAU);
+      ctx.fill();
+      ctx.strokeStyle = '#3b3b3b';
+      ctx.lineWidth = 7;
+      ctx.stroke();
+    }
+  }
+  ctx.fillStyle = '#202226';
+  ctx.fillRect(1000, bottom + 36, 820, 60);
+  ctx.fillStyle = '#1e1e1e';
+  ctx.fillRect(right, bottom - 40, 60, 30);
+  // Anti-climber bumper at the front.
+  ctx.fillRect(50, bottom - 70, 50, 60);
+
+  const steel = ctx.createLinearGradient(0, top, 0, bottom);
+  steel.addColorStop(0, '#d7dade');
+  steel.addColorStop(0.4, '#aeb3b8');
+  steel.addColorStop(0.7, '#c4c8cc');
+  steel.addColorStop(1, '#8d9297');
+  ctx.fillStyle = steel;
+  ctx.fillRect(90, top, right - 90, BODY.h);
+  for (let x = 102; x < right - 8; x += 28) {
+    ctx.fillStyle = 'rgba(255,255,255,0.2)';
+    ctx.fillRect(x, top + 20, 3, BODY.h - 40);
+    ctx.fillStyle = 'rgba(0,0,0,0.14)';
+    ctx.fillRect(x + 11, top + 20, 4, BODY.h - 40);
+  }
+  ctx.fillStyle = '#7f858b';
+  ctx.fillRect(80, top - 40, right - 70, 44);
+  ctx.fillStyle = '#a3a9ae';
+  ctx.fillRect(80, top - 40, right - 70, 8);
+
+  // Driver's end: darker cab bulkhead, side window, headlight and marker lamps.
+  ctx.fillStyle = '#7d8389';
+  ctx.fillRect(90, top, 70, BODY.h);
+  const glass = ctx.createLinearGradient(170, 280, 460, 560);
+  glass.addColorStop(0, '#2b333c');
+  glass.addColorStop(0.5, '#161b21');
+  glass.addColorStop(1, '#3a4450');
+  ctx.fillStyle = glass;
+  ctx.fillRect(190, 280, 260, 290);
+  ctx.strokeStyle = '#141619';
+  ctx.lineWidth = 10;
+  ctx.strokeRect(190, 280, 260, 290);
+  ctx.lineWidth = 6;
+  ctx.strokeRect(170, 250, 300, 690);
+  ctx.fillStyle = '#fffbe0';
+  ctx.fillRect(66, 300, 28, 50);
+  ctx.fillStyle = 'rgba(255,250,210,0.35)';
+  ctx.beginPath();
+  ctx.arc(70, 325, 60, 0, TAU);
+  ctx.fill();
+  ctx.fillStyle = '#e8b400';
+  ctx.fillRect(66, 760, 26, 36);
+  ctx.fillStyle = '#c0261d';
+  ctx.fillRect(66, 812, 26, 36);
+
+  drawSignPanel(ctx, 560, 300, right - 640, 420, sign, false);
+
+  ctx.fillStyle = '#1d1f22';
+  ctx.font = 'bold 56px "Arial Narrow", Arial, sans-serif';
+  ctx.textBaseline = 'top';
+  ctx.fillText('7001', 560, 780);
+  ctx.textBaseline = 'alphabetic';
+  const grime = ctx.createLinearGradient(0, top, 0, bottom);
+  grime.addColorStop(0.6, 'rgba(0,0,0,0)');
+  grime.addColorStop(1, 'rgba(30,24,18,0.35)');
+  ctx.fillStyle = grime;
+  ctx.fillRect(90, top, right - 90, BODY.h);
+}
+
+function engineImage(kind: 'freight' | 'subway', sign: EngineSign): HTMLCanvasElement {
+  const key = `${kind}\n${sign.main}\n${sign.sub}`;
+  let img = engineCache.get(key);
+  if (img) return img;
+  const w = kind === 'freight' ? ENGINE_W : SUB_CAB_W;
+  img = document.createElement('canvas');
+  img.width = Math.ceil(w * ENGINE_CACHE_SCALE);
+  img.height = Math.ceil(CAR_HEIGHT * ENGINE_CACHE_SCALE);
+  const c = img.getContext('2d')!;
+  c.scale(ENGINE_CACHE_SCALE, ENGINE_CACHE_SCALE);
+  if (kind === 'freight') drawFreightEngine(c, sign);
+  else drawSubwayCab(c, sign);
+  if (engineCache.size >= 8) engineCache.delete(engineCache.keys().next().value!);
+  engineCache.set(key, img);
+  return img;
+}
+
+const topEngineW = (r: RollState) => (r.showcase && rollCount(r) > 0 ? ENGINE_W : 0);
+
 function renderRollBy(now: number): void {
   const r = roll!;
   const ctx = r.showcase ? showcaseCtx : viewCtx;
@@ -3812,9 +4133,10 @@ function renderRollBy(now: number): void {
   // A selected car stays centered even as its reel resizes around it.
   const pinnedTop = r.showcase && r.paused ? reelSel.top.pinned : null;
   if (pinnedTop !== null) r.x = pinnedTop * CAR_WIDTH + CAR_WIDTH / 2 - L.W / (2 * L.scale);
-  // Loop: once the last car clears, the train re-enters from the right.
-  if (r.x > rollCount(r) * CAR_WIDTH) r.x = -L.W / L.scale;
-  else if (r.x < -L.W / L.scale) r.x = rollCount(r) * CAR_WIDTH;
+  // Loop: once the last car clears, the train re-enters, engine first in the gallery.
+  const trainEnd = rollCount(r) * CAR_WIDTH + topEngineW(r);
+  if (r.x > trainEnd) r.x = -L.W / L.scale;
+  else if (r.x < -L.W / L.scale) r.x = trainEnd;
 
   const rc = { x: -r.x * L.scale, y: L.bar, scale: L.scale };
   drawBackdrop(ctx, r.showcase ? { x: 0, y: rc.y, scale: rc.scale } : rc, px, L.W, L.H);
@@ -3831,6 +4153,13 @@ function renderRollBy(now: number): void {
       drawCarComposite(ctx, e ? entryBaseId(e) : baseIdFor(currentYard, i), r.images[i] ?? null, false);
     }
     if (i > 0) drawKnuckle(ctx, 0);
+  }
+  // The gallery train is led by its engine, coupled ahead of the last (front) car.
+  const engineX = rollCount(r) * CAR_WIDTH;
+  if (topEngineW(r) && engineX < r.x + L.W / L.scale && engineX + ENGINE_W > r.x) {
+    ctx.setTransform(s, 0, 0, s, px * (rc.x + engineX * L.scale), px * rc.y);
+    ctx.drawImage(engineImage('freight', engineSign('top')), 0, 0, ENGINE_W, CAR_HEIGHT);
+    drawKnuckle(ctx, 0);
   }
 
   ctx.setTransform(px, 0, 0, px, 0, 0);
@@ -3882,6 +4211,7 @@ const ccReportBtn = document.getElementById('cc-report') as HTMLButtonElement;
 const visitPromoBtn = document.getElementById('visit-promo-btn') as HTMLButtonElement;
 const promoSlidePanel = document.getElementById('promo-slide-panel')!;
 const ccCloseBtn = document.getElementById('cc-close') as HTMLButtonElement;
+const ccBackLabel = document.getElementById('cc-back-label')!;
 const ccPrevBtn = document.getElementById('cc-prev') as HTMLButtonElement;
 const ccNextBtn = document.getElementById('cc-next') as HTMLButtonElement;
 const ccCount = document.getElementById('cc-count')!;
@@ -4289,7 +4619,19 @@ function showCard(i: number, src: 'top' | 'sub' = 'top'): void {
   }
   landingEl.dataset.sel = src;
   selPanel.dataset.src = src;
+  ccBackLabel.textContent = `Back to ${reelName(src)}`;
   renderCard(e);
+}
+
+// The name of the line-up the visitor was browsing, matching the reel's own controls.
+function reelName(src: ReelId): string {
+  if (myWork[src]) return src === 'top' ? 'My Trains' : 'My Subways';
+  if (competitionView) {
+    const kind = src === 'top' ? 'Monthly' : 'Weekly';
+    return archivesView ? `${kind} Archive` : `${kind} Battle`;
+  }
+  const select = document.getElementById(src === 'top' ? 'top-feed' : 'sub-feed') as HTMLSelectElement;
+  return select.selectedOptions[0]?.textContent ?? 'Gallery';
 }
 
 // Every selected car gets the comment half; only published pieces can actually take comments.
@@ -5004,7 +5346,7 @@ function startReel(entries: RollEntry[], title: string, yardLine: boolean): void
     roll.images = new Array<CanvasImageSource | null>(entries.length).fill(null);
     roll.viewCar = -1;
     roll.paused = false;
-    roll.x = entries.length * CAR_WIDTH;
+    roll.x = entries.length * CAR_WIDTH + ENGINE_W;
     if (cardSrc === 'top') showCard(-1, 'top');
     updateRollControls();
     entries.forEach((e, i) => void loadEntryImage(e, i, token));
@@ -5917,15 +6259,17 @@ function renderSubwayReel(now: number): void {
   const oy = (H - EXPORT_CROP.h * scale) / 2 - EXPORT_CROP.y * scale;
   const railY = oy + 1142 * scale;
   const trainW = subwayReel.entries.length * CAR_WIDTH * scale;
+  // The driver's cab leads at the left, ahead of car 0.
+  const cabW = subwayReel.entries.length ? SUB_CAB_W * scale : 0;
   const dt = subwayReel.lastT ? Math.min(0.1, (now - subwayReel.lastT) / 1000) : 0;
   subwayReel.lastT = now;
-  if (Number.isNaN(subwayReel.sx)) subwayReel.sx = W;
+  if (Number.isNaN(subwayReel.sx)) subwayReel.sx = W + cabW;
   if (!subwayReel.paused) {
     subwayReel.sx -= ROLL_SPEED * ROLL_SPEEDS[subwayReel.speedIdx]!.rate * scale * dt;
   }
   if (pinnedSub !== null) subwayReel.sx = W / 2 - (pinnedSub * CAR_WIDTH + CAR_WIDTH / 2) * scale;
-  if (subwayReel.sx + trainW < 0) subwayReel.sx = W;
-  else if (subwayReel.sx > W) subwayReel.sx = -trainW;
+  if (subwayReel.sx + trainW < 0) subwayReel.sx = W + cabW;
+  else if (subwayReel.sx > W + cabW) subwayReel.sx = -trainW;
   maybeGrowSub(W, scale);
   subGeom = { W, scale, trainW };
 
@@ -5940,6 +6284,13 @@ function renderSubwayReel(now: number): void {
     drawCarComposite(ctx, entryBaseId(e), subwayReel.images[i] ?? null, false);
     if (i > 0) drawKnuckle(ctx, 0);
   });
+  const cabX = subwayReel.sx - cabW;
+  if (cabW && cabX < W && subwayReel.sx > 0) {
+    ctx.setTransform(s, 0, 0, s, px * cabX, px * oy);
+    ctx.drawImage(engineImage('subway', engineSign('sub')), 0, 0, SUB_CAB_W, CAR_HEIGHT);
+    ctx.setTransform(s, 0, 0, s, px * subwayReel.sx, px * oy);
+    drawKnuckle(ctx, 0);
+  }
   ctx.setTransform(px, 0, 0, px, 0, 0);
   // Edge shading would darken the ends of a selected, full-width car.
   if (pinnedSub === null) {

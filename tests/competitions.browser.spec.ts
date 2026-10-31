@@ -44,7 +44,7 @@ test('homepage adds only paired actions and feed choices; competition archives a
   await expect(page.locator('#competitions-start strong')).toHaveText('BATTLES');
   await expect(page.locator('#paint-start strong')).toHaveText('JUST PAINT');
   await expect(page.locator('#top-feed option')).toHaveCount(4);
-  await expect(page.locator('#top-feed option[value="all"]')).toHaveText('The Yard');
+  await expect(page.locator('#top-feed option[value="all"]')).toHaveText('Main Yard Train');
   await expect(page.locator('#top-feed option[value="weekly"]')).toHaveText("This Week's Battle");
   await expect(page.locator('#top-feed option[value="monthly"]')).toHaveText("This Month's Battle");
   await expect(page.locator('#sc-sort')).toHaveValue('latest');

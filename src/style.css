@@ -2255,7 +2255,37 @@ body.showcase .dispatch {
   justify-content: space-between;
   gap: 6px;
   margin-bottom: 10px;
-  margin-right: 22px;
+}
+
+/* Releases the selected car; same as tapping the car again. */
+.cc-back {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 34px;
+  margin-bottom: 10px;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 6px;
+  background: #ffd200;
+  color: #111;
+  font: 800 13px/1.1 ui-monospace, monospace;
+  cursor: pointer;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.cc-back #cc-back-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cc-back:hover,
+.cc-back:focus-visible {
+  background: #ffe24d;
 }
 
 .cc-nav button {
@@ -2312,7 +2342,7 @@ body.showcase .dispatch {
 
   #car-card .cc-nav {
     gap: 10px;
-    margin: 0 50px 8px 0;
+    margin: 0 0 8px;
   }
 
   #car-card .cc-nav button {
@@ -2326,19 +2356,9 @@ body.showcase .dispatch {
     font: 700 13px/1 ui-monospace, monospace;
   }
 
-  #car-card .cc-close {
-    top: 10px;
-    right: 10px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 40px;
-    height: 40px;
-    border: 1px solid #3a3d44;
-    border-radius: 8px;
-    background: #15171b;
-    color: #e8e6e1;
-    font-size: 26px;
+  #car-card .cc-back {
+    min-height: 40px;
+    font-size: 14px;
   }
 
   #car-card .cc-date,
