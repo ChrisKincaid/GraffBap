@@ -5,6 +5,7 @@ import {
   getDoc,
   getDocs,
   limit,
+  onSnapshot,
   orderBy,
   query,
   setDoc,
@@ -135,6 +136,55 @@ async function voteTarget<T>(id: string, kind: 'props' | 'toy', target: 'artwork
 }
 
 export type ReportReason = 'harassment' | 'explicit' | 'hate' | 'spam' | 'other';
+
+export interface CarComment {
+  id: string;
+  uid: string;
+  name: string;
+  text: string;
+  at: number;
+}
+
+export const COMMENT_MAX = 280;
+
+// Newest 50 comments on a published piece, kept live while the wall is open.
+export function watchComments(carId: string, onChange: (comments: CarComment[]) => void, onError: (err: unknown) => void): () => void {
+  return onSnapshot(
+    query(collection(db, 'graffiti_cars', carId, 'comments'), orderBy('at', 'desc'), limit(50)),
+    (snap) => onChange(snap.docs.map((d) => ({
+      id: d.id,
+      uid: String(d.get('uid') ?? ''),
+      name: String(d.get('name') ?? 'Writer'),
+      text: String(d.get('text') ?? ''),
+      at: Number(d.get('at') ?? 0),
+    }))),
+    onError,
+  );
+}
+
+type CommentCall =
+  | { action: 'post'; carId: string; text: string }
+  | { action: 'delete'; carId: string; commentId: string }
+  | { action: 'report'; carId: string; commentId: string; reason: ReportReason; captchaToken?: string };
+
+async function commentCall<T>(data: CommentCall): Promise<T> {
+  requireAbuseProtection();
+  return (await httpsCallable<CommentCall, T>(graffitiFunctions, 'graffitiComment')(data)).data;
+}
+
+export function postComment(carId: string, text: string): Promise<CarComment> {
+  return commentCall<CarComment>({ action: 'post', carId, text });
+}
+
+export async function deleteComment(carId: string, commentId: string): Promise<void> {
+  await commentCall<{ success: boolean }>({ action: 'delete', carId, commentId });
+}
+
+export async function reportComment(carId: string, commentId: string, reason: ReportReason, captchaToken?: string): Promise<'already' | 'reported'> {
+  return (await commentCall<{ result: 'already' | 'reported' }>({
+    action: 'report', carId, commentId, reason, ...(captchaToken ? { captchaToken } : {}),
+  })).result;
+}
 
 export async function reportRegistryCar(id: string, reason: ReportReason, captchaToken?: string, target: 'artwork' | 'promo' = 'artwork'): Promise<'already' | 'reported'> {
   requireAbuseProtection();

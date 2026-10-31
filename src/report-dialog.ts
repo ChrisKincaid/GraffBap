@@ -1,5 +1,5 @@
 import { ensureAnonymous } from './services/firebase';
-import { reportRegistryCar, type ReportReason } from './services/registry';
+import { reportComment, reportRegistryCar, type ReportReason } from './services/registry';
 import { actionError } from './services/protected-actions';
 
 interface CaptchaApi {
@@ -14,6 +14,7 @@ declare global {
 }
 
 const dialog = document.getElementById('report-dialog') as HTMLDialogElement;
+const title = document.getElementById('report-title')!;
 const form = document.getElementById('report-form') as HTMLFormElement;
 const reason = document.getElementById('report-reason') as HTMLSelectElement;
 const message = document.getElementById('report-error')!;
@@ -24,6 +25,7 @@ let widget: number | undefined;
 let captchaLoading: Promise<CaptchaApi> | null = null;
 let selectedId: string | null = null;
 let selectedTarget: 'artwork' | 'promo' = 'artwork';
+let selectedComment: string | null = null;
 let finish: ((result: 'already' | 'reported' | null) => void) | null = null;
 
 async function showChallenge(): Promise<void> {
@@ -73,7 +75,9 @@ form.addEventListener('submit', async event => {
   try {
     await ensureAnonymous();
     const captchaToken = widget === undefined ? undefined : window.grecaptcha?.getResponse(widget);
-    const result = await reportRegistryCar(selectedId, reason.value as ReportReason, captchaToken, selectedTarget);
+    const result = selectedComment
+      ? await reportComment(selectedId, selectedComment, reason.value as ReportReason, captchaToken)
+      : await reportRegistryCar(selectedId, reason.value as ReportReason, captchaToken, selectedTarget);
     finish?.(result);
     finish = null;
     dialog.close();
@@ -102,14 +106,25 @@ dialog.addEventListener('cancel', event => {
 });
 dialog.addEventListener('close', () => {
   selectedId = null;
+  selectedComment = null;
   finish?.(null);
   finish = null;
 });
 
 export function reportArtwork(id: string, target: 'artwork' | 'promo' = 'artwork'): Promise<'already' | 'reported' | null> {
+  return openReport(id, target, null);
+}
+
+export function reportCarComment(carId: string, commentId: string): Promise<'already' | 'reported' | null> {
+  return openReport(carId, 'artwork', commentId);
+}
+
+function openReport(id: string, target: 'artwork' | 'promo', commentId: string | null): Promise<'already' | 'reported' | null> {
   if (dialog.open) return Promise.resolve(null);
   selectedId = id;
   selectedTarget = target;
+  selectedComment = commentId;
+  title.textContent = commentId ? 'Report comment' : 'Report artwork';
   form.reset();
   message.textContent = '';
   if (widget !== undefined) window.grecaptcha?.reset(widget);

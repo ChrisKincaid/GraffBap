@@ -39,6 +39,7 @@ import {
   signOutUser,
 } from './services/firebase';
 import { reportArtwork } from './report-dialog';
+import { createCommentWall } from './comment-wall';
 import { actionError } from './services/protected-actions';
 import { PromoService, type PromoAd } from './services/promoService';
 import {
@@ -2451,6 +2452,8 @@ window.addEventListener('keydown', (e) => {
     return;
   }
   if (roll) {
+    // Typing a comment must not pause the reel or leave the gallery.
+    if (isTyping(e.target)) return;
     if (e.code === 'Space') {
       e.preventDefault();
       toggleRollPause();
@@ -3876,6 +3879,20 @@ const ccPrevBtn = document.getElementById('cc-prev') as HTMLButtonElement;
 const ccNextBtn = document.getElementById('cc-next') as HTMLButtonElement;
 const ccCount = document.getElementById('cc-count')!;
 const ccPaintBtn = document.getElementById('cc-paint') as HTMLButtonElement;
+const ccCommentsBtn = document.getElementById('cc-comments') as HTMLButtonElement;
+const ccCommentsCount = document.getElementById('cc-comments-count')!;
+const commentWall = createCommentWall({
+  user: () => currentUser,
+  requireAccount: (retry) => requireAuth(retry, true),
+  toast: (message, ms) => showToast(message, ms),
+});
+commentWall.onCountChange((n) => {
+  ccCommentsCount.textContent = n ? String(n >= 50 ? '50+' : n) : '';
+});
+ccCommentsBtn.addEventListener('click', () => {
+  ccCommentsBtn.blur();
+  commentWall.openMobile();
+});
 const PENCIL_SVG =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20l4-1 11-11-3-3L5 16z"/><path d="M14 7l3 3"/></svg>';
 
@@ -4261,7 +4278,7 @@ const cardEntryAt = (i: number): RollEntry | null => {
 function showCard(i: number, src: 'top' | 'sub' = 'top'): void {
   if (i === cardCar && src === cardSrc) return;
   const previousFrame = document.getElementById(cardSrc === 'sub' ? 'subway-frame' : 'showcase-frame');
-  previousFrame?.classList.remove('has-selection');
+  previousFrame?.classList.remove('has-selection', 'has-wall');
   cardSrc = src;
   const e = cardEntryAt(i);
   cardCar = e ? i : -1;
@@ -4269,6 +4286,7 @@ function showCard(i: number, src: 'top' | 'sub' = 'top'): void {
   const frame = document.getElementById(src === 'sub' ? 'subway-frame' : 'showcase-frame');
   frame?.classList.toggle('has-selection', !!e);
   if (!e) {
+    commentWall.show(null);
     setPromoDrawer(false);
     visitPromoBtn.onclick = null;
     carCard.style.left = '';
@@ -4277,6 +4295,16 @@ function showCard(i: number, src: 'top' | 'sub' = 'top'): void {
   }
   positionCarCard();
   renderCard(e);
+}
+
+// Published pieces (including battle entries) get a comment wall in the left gutter.
+function syncCommentWall(e: RollEntry): void {
+  const reg = !e.isPromo ? e.reg : undefined;
+  const wallCar = reg ? { id: reg.id, writerUid: reg.writerUid } : null;
+  commentWall.show(wallCar);
+  ccCommentsBtn.hidden = !wallCar;
+  document.getElementById(cardSrc === 'sub' ? 'subway-frame' : 'showcase-frame')?.classList.toggle('has-wall', !!wallCar);
+  positionCarCard();
 }
 
 function setPromoDrawer(open: boolean): void {
@@ -4297,6 +4325,7 @@ function openPromoLink(e: RollEntry): void {
 }
 
 function renderCard(e: RollEntry): void {
+  syncCommentWall(e);
   setPromoDrawer(!!e.isPromo);
   visitPromoBtn.onclick = e.isPromo ? () => openPromoLink(e) : null;
   const inspectButton = document.getElementById('cc-bench')!;
@@ -4383,17 +4412,26 @@ const mobileCard = () => window.matchMedia('(max-width: 700px)').matches;
 // The selected-car panel sits in the gutter the reel track opens up, so it reads as part of the reel.
 function positionCarCard(): void {
   if (cardCar < 0 || carCard.hidden) return;
+  const wallEl = commentWall.element;
   if (mobileCard()) {
     carCard.style.left = '';
     carCard.style.top = '';
+    wallEl.style.left = wallEl.style.top = wallEl.style.height = '';
     return;
   }
   const frame = document.getElementById(cardSrc === 'sub' ? 'subway-frame' : 'showcase-frame');
   const track = frame?.querySelector('.reel-track');
   if (!track) return;
   const bounds = track.getBoundingClientRect();
+  const top = Math.max(12, Math.min(bounds.top, innerHeight - carCard.offsetHeight - 12));
   carCard.style.left = `${bounds.right}px`;
-  carCard.style.top = `${Math.max(12, Math.min(bounds.top, innerHeight - carCard.offsetHeight - 12))}px`;
+  carCard.style.top = `${top}px`;
+  if (!wallEl.hidden) {
+    // Mirrors the car panel: same top and height, in the gutter left of the track.
+    wallEl.style.left = `${bounds.left - wallEl.offsetWidth}px`;
+    wallEl.style.top = `${top}px`;
+    wallEl.style.height = `${carCard.offsetHeight}px`;
+  }
 }
 
 // Closing the card hands the reel back to the viewer, rolling.
@@ -4537,6 +4575,9 @@ function myVote(key: string): VoteKind | null {
   return v === undefined ? null : v === 'toy' ? 'toy' : 'props';
 }
 
+// Server votes in flight, keyed by entryKey; shown immediately and settled or rolled back on reply.
+const pendingVotes = new Map<string, VoteKind>();
+
 function renderRating(e: RollEntry, ui: RatingUI): void {
   ui.propsBtn.hidden = ui.toyBtn.hidden = !!e.reg?.competitionId;
   if (e.reg?.competitionId) {
@@ -4545,15 +4586,50 @@ function renderRating(e: RollEntry, ui: RatingUI): void {
   }
   const key = entryKey(e);
   const meta = readMeta();
-  const p = entryProps(e, meta);
-  const t = entryToys(e, meta);
+  let p = entryProps(e, meta);
+  let t = entryToys(e, meta);
+  const saved = myVote(key);
+  const pending = pendingVotes.get(key);
+  if (pending && pending !== saved) {
+    if (saved === 'props') p = Math.max(0, p - 1);
+    if (saved === 'toy') t = Math.max(0, t - 1);
+    if (pending === 'props') p++;
+    else t++;
+  }
   const total = p + t;
   ui.props.textContent = String(p);
   ui.toys.textContent = String(t);
   ui.approval.textContent = total ? `${Math.round((p / total) * 100)}% approval · ${total} vote${total === 1 ? '' : 's'}` : 'No votes yet';
-  const mine = myVote(key);
+  const mine = pending ?? saved;
   ui.propsBtn.setAttribute('aria-pressed', String(mine === 'props'));
   ui.toyBtn.setAttribute('aria-pressed', String(mine === 'toy'));
+  ui.propsBtn.setAttribute('aria-busy', String(pending === 'props'));
+  ui.toyBtn.setAttribute('aria-busy', String(pending === 'toy'));
+}
+
+function renderVoteEverywhere(e: RollEntry): void {
+  const key = entryKey(e);
+  const cardE = cardCar >= 0 ? cardEntryAt(cardCar) : null;
+  if (cardE && entryKey(cardE) === key) renderRating(cardE, cardRatingUI);
+  if (benchEntry && entryKey(benchEntry) === key) renderRating(benchEntry, benchRatingUI());
+}
+
+// Returns false when a vote for this car is already on its way.
+function beginPendingVote(e: RollEntry, kind: VoteKind): boolean {
+  const key = entryKey(e);
+  if (pendingVotes.has(key)) return false;
+  pendingVotes.set(key, kind);
+  if (myVote(key) !== kind && !roll?.showcase) (kind === 'props' ? playPuff : playPeel)();
+  renderVoteEverywhere(e);
+  const card = cardCar >= 0 ? cardEntryAt(cardCar) : null;
+  if (card && entryKey(card) === key) popEls(kind === 'props' ? ccPropsBtn : ccToyBtn);
+  if (benchEntry && entryKey(benchEntry) === key) popEls(kind === 'props' ? benchPropsBtn : benchToyBtn);
+  return true;
+}
+
+function endPendingVote(e: RollEntry): void {
+  pendingVotes.delete(entryKey(e));
+  renderVoteEverywhere(e);
 }
 
 // One vote per BoxBap.com profile per car (props OR toy); switching moves the vote. Recorded on this device.
@@ -4568,7 +4644,9 @@ function castVote(e: RollEntry, kind: VoteKind, done: () => void): void {
   }
   if (e.isPromo && e.id) {
     const uid = currentUser.uid;
+    if (!beginPendingVote(e, kind)) return;
     void votePromoAd(e.id, kind).then(result => {
+      pendingVotes.delete(entryKey(e));
       for (const entry of [...(roll?.entries ?? []), ...subwayReel.entries, e, ...(benchEntry ? [benchEntry] : [])]) {
         if (entry.isPromo && entry.id === e.id) {
           entry.promoAd = result.car;
@@ -4588,6 +4666,7 @@ function castVote(e: RollEntry, kind: VoteKind, done: () => void): void {
       if (benchEntry?.isPromo && benchEntry.id === e.id) renderRating(benchEntry, benchRatingUI());
     }).catch(err => {
       console.error('Promo vote failed', err);
+      endPendingVote(e);
       showToast(actionError(err), 6000);
     });
     return;
@@ -4621,8 +4700,10 @@ function castVote(e: RollEntry, kind: VoteKind, done: () => void): void {
 function castRegistryVote(e: RollEntry, kind: VoteKind, done: () => void): void {
   const reg = e.reg!;
   const uid = currentUser!.uid;
+  if (!beginPendingVote(e, kind)) return;
   void voteRegistryCar(reg.id, kind)
     .then((r) => {
+      pendingVotes.delete(entryKey(e));
       e.reg = r.car;
       e.props = r.car.props;
       const votes = readVotes();
@@ -4633,14 +4714,15 @@ function castRegistryVote(e: RollEntry, kind: VoteKind, done: () => void): void 
         console.warn('Rating saved, but this browser could not remember it locally.', err);
       }
       if (r.already) showToast(kind === 'props' ? 'You already dropped props on this car.' : 'You already called this one whack.');
-      else if (!roll?.showcase) (kind === 'props' ? playPuff : playPeel)();
       if (r.promoted) {
         showToast(`Hall of Fame – ${e.writer}'s piece just got inducted.`, 4000);
       }
       done();
+      renderVoteEverywhere(e);
     })
     .catch((err) => {
       console.error('Vote failed', err);
+      endPendingVote(e);
       showToast(actionError(err), 6000);
     });
 }
@@ -6266,6 +6348,7 @@ onAuthStateChanged(auth, (user) => {
   userName.textContent = named ? user.displayName || user.email?.split('@')[0] || 'Signed in' : '';
   authBtn.textContent = named ? 'Sign Out' : 'Sign In';
   renderAccount();
+  commentWall.refresh();
   // Signing out of a real profile must still leave a uid behind to paint with.
   if (!user) void ensureAnonymous().catch((err) => console.error('Anonymous sign-in failed', err));
 });

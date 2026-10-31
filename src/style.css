@@ -1323,11 +1323,15 @@ body.showcase .dispatch {
   overflow: hidden;
   background: #000;
   grid-row: 2;
-  transition: margin-right 160ms ease;
+  transition: margin-right 160ms ease, margin-left 160ms ease;
 }
 
 .reel.has-selection .reel-track {
   margin-right: 296px;
+}
+
+.reel.has-wall .reel-track {
+  margin-left: 260px;
 }
 
 /* Graffiti loader: a shaking can spraying a drippy tag while the line-up downloads. */
@@ -2660,6 +2664,20 @@ body.showcase .dispatch {
 #bench-props[aria-pressed='true'] {
   outline: 2px solid #fff;
   outline-offset: 1px;
+}
+
+#cc-props[aria-busy='true'],
+#cc-toy[aria-busy='true'],
+#bench-props[aria-busy='true'],
+#bench-toy[aria-busy='true'] {
+  cursor: progress;
+  animation: vote-pending 0.9s ease-in-out infinite alternate;
+}
+
+@keyframes vote-pending {
+  to {
+    opacity: 0.6;
+  }
 }
 
 .toy-btn.pop {
@@ -4467,4 +4485,269 @@ body.rollby #toolbar {
 .wid-kicker img {
   height: 30px;
   width: auto;
+}
+
+/* Comment wall: mirrors the car panel in the left gutter on desktop; a full-screen sheet on phones. */
+#comment-wall {
+  position: fixed;
+  z-index: 12;
+  display: flex;
+  width: 260px;
+  min-height: 0;
+  flex-direction: column;
+  box-sizing: border-box;
+  padding: 10px 10px 8px;
+  border-right: 1px solid #2c2f36;
+  background: #000;
+  color: #ddd;
+  font: 12px/1.4 system-ui, sans-serif;
+}
+
+#comment-wall[hidden] {
+  display: none;
+}
+
+.cw-head {
+  display: flex;
+  flex: none;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+#cw-title {
+  margin: 0;
+  color: #ffd200;
+  font: 400 15px/1 'Stardos Stencil', Impact, sans-serif;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+#cw-count {
+  color: #8a877f;
+  font: 600 11px/1 ui-monospace, monospace;
+}
+
+#cw-close {
+  display: none;
+}
+
+#cw-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0;
+  padding: 0 4px 0 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  list-style: none;
+}
+
+#cw-list li {
+  padding: 6px 0;
+  border-bottom: 1px solid #1c1e23;
+}
+
+#cw-list p {
+  margin: 2px 0 0;
+  color: #e8e6e1;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.cw-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.cw-meta strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #ffd200;
+  font: 700 11px/1.3 ui-monospace, monospace;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.cw-meta time {
+  flex: none;
+  color: #6f6c66;
+  font: 600 10px/1.3 ui-monospace, monospace;
+}
+
+.cw-meta button {
+  flex: none;
+  margin-left: auto;
+  padding: 0 2px;
+  border: none;
+  background: none;
+  color: #6f6c66;
+  font: 600 10px/1.3 ui-monospace, monospace;
+  cursor: pointer;
+}
+
+.cw-meta button + button {
+  margin-left: 4px;
+}
+
+.cw-meta button:hover:not(:disabled) {
+  color: #ff6a2b;
+}
+
+.cw-meta button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+#cw-empty {
+  flex: 1 1 auto;
+  margin: 8px 0;
+  color: #8a877f;
+  font: 600 11px/1.4 ui-monospace, monospace;
+}
+
+#cw-empty[hidden] {
+  display: none;
+}
+
+#cw-form {
+  flex: none;
+  margin-top: 6px;
+}
+
+#cw-text {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 40px;
+  max-height: 72px;
+  padding: 6px 8px;
+  border: 1px solid #3a3d44;
+  border-radius: 6px;
+  background: #0f1013;
+  color: #e8e6e1;
+  font: 12px/1.35 system-ui, sans-serif;
+  resize: none;
+}
+
+#cw-text:focus {
+  border-color: #ffd200;
+  outline: none;
+}
+
+.cw-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+#cw-left {
+  color: #8a877f;
+  font: 600 10px/1 ui-monospace, monospace;
+}
+
+#cw-send {
+  padding: 5px 12px;
+  border: 1px solid #ffd200;
+  border-radius: 6px;
+  background: #ffd200;
+  color: #111;
+  font: 800 11px/1 ui-monospace, monospace;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+#cw-send:disabled {
+  border-color: #3a3d44;
+  background: #1a1b1f;
+  color: #6f6c66;
+  cursor: default;
+}
+
+#cc-comments {
+  display: none;
+}
+
+@media (max-width: 700px) {
+  .reel.has-wall .reel-track {
+    margin-left: 0;
+  }
+
+  #car-card .cc-actions > #cc-comments:not([hidden]) {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    border: 1px solid #555;
+    border-radius: 6px;
+    background: #2a2a2a;
+    color: #eee;
+    font: 700 13px/1 ui-monospace, monospace;
+    cursor: pointer;
+  }
+
+  #cc-comments svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  #cc-comments-count:empty {
+    display: none;
+  }
+
+  #comment-wall {
+    display: none;
+  }
+
+  #comment-wall.is-open:not([hidden]) {
+    inset: 0;
+    z-index: 31;
+    display: flex;
+    width: auto;
+    padding: 14px;
+    border: none;
+    background: #0b0c0f;
+    font-size: 14px;
+  }
+
+  #comment-wall.is-open #cw-close {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    margin-left: auto;
+    border: 1px solid #3a3d44;
+    border-radius: 8px;
+    background: #15171b;
+    color: #e8e6e1;
+    font-size: 26px;
+    cursor: pointer;
+  }
+
+  .cw-head {
+    align-items: center;
+  }
+
+  #cw-title {
+    font-size: 20px;
+  }
+
+  .cw-meta strong,
+  .cw-meta button {
+    font-size: 13px;
+  }
+
+  #cw-text {
+    font-size: 16px;
+  }
+
+  #cw-send {
+    min-height: 40px;
+    padding: 0 18px;
+    font-size: 14px;
+  }
 }

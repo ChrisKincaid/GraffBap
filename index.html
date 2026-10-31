@@ -363,6 +363,10 @@
         <button id="cc-report" type="button" aria-label="Report this car" title="Report this car to moderators">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 21V4h11l-1.5 3.5L16 11H5"/></svg>
         </button>
+        <button id="cc-comments" type="button" aria-label="Open comments" title="Comments" hidden>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"/></svg>
+          <span id="cc-comments-count"></span>
+        </button>
       </div>
       <button id="cc-paint" class="cc-paint" type="button" aria-label="Paint this car">
         <span class="cc-paint-icon" aria-hidden="true"></span>
@@ -376,6 +380,22 @@
         <button id="visit-promo-btn" class="btn promo-action-btn" type="button">Visit Link</button>
       </div>
     </div>
+    <aside id="comment-wall" hidden aria-labelledby="cw-title">
+      <header class="cw-head">
+        <h2 id="cw-title">Wall Talk</h2>
+        <span id="cw-count" aria-live="polite"></span>
+        <button id="cw-close" type="button" aria-label="Close comments" title="Close">&times;</button>
+      </header>
+      <ol id="cw-list"></ol>
+      <p id="cw-empty">No words yet. Drop the first one.</p>
+      <form id="cw-form" autocomplete="off">
+        <textarea id="cw-text" maxlength="280" rows="2" placeholder="Say something about this piece..." aria-label="Write a comment"></textarea>
+        <div class="cw-row">
+          <span id="cw-left" aria-hidden="true"></span>
+          <button id="cw-send" type="submit">Post</button>
+        </div>
+      </form>
+    </aside>
     <div id="writer-id" hidden role="dialog" aria-labelledby="wid-title" data-mode="account">
       <div class="wid-kicker"><img src="/Images/BoxBapLogoSm.png" alt="BoxBap.com" /></div>
       <h2 id="wid-title">BOXBAP.COM ACCOUNT</h2>
@@ -481,7 +501,7 @@
     <dialog id="report-dialog" aria-labelledby="report-title">
       <form id="report-form">
         <h2 id="report-title">Report artwork</h2>
-        <p>No account required. Reports go to moderators; reporting does not automatically remove artwork.</p>
+        <p>No account required. Reports go to moderators; reporting does not automatically remove anything.</p>
         <label for="report-reason">Reason</label>
         <select id="report-reason" required>
           <option value="" disabled selected>Select a reason</option>
