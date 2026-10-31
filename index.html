@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="en">
   <head>
     <style>
@@ -333,69 +333,65 @@
       <p class="welcome-account-note">Paint without an account, or sign in with BoxBap.com to enter battles and vote.</p>
       <button id="welcome-close" class="cta" type="button">Got it</button>
     </dialog>
-    <div id="car-card" hidden>
-      <button id="cc-close" class="cc-close" type="button" aria-label="Close car panel" title="Close">&times;</button>
-      <canvas id="cc-preview" class="cc-preview" aria-hidden="true"></canvas>
-      <div class="cc-nav">
-        <button id="cc-prev" type="button" aria-label="Car to the left" title="Car to the left">&lsaquo;</button>
-        <span id="cc-count" aria-live="polite"></span>
-        <button id="cc-next" type="button" aria-label="Car to the right" title="Car to the right">&rsaquo;</button>
-      </div>
-      <div class="cc-date"></div>
-      <div class="cc-by"></div>
-      <div class="cc-approval"></div>
-      <div class="cc-tally" aria-live="polite"><span id="cc-props-count">0</span> props · <span id="cc-toy-count">0</span> whack</div>
-      <div id="cc-competition" hidden>
-        <p id="cc-competition-status"></p>
-        <button id="cc-competition-vote" type="button">Vote for This Entry</button>
-        <button id="cc-competition-share" type="button">Share Entry</button>
-      </div>
-      <div class="cc-actions">
-        <button id="cc-props" type="button" aria-label="Give props" title="Give Props">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M7 22V10l4.2-6.4a1.8 1.8 0 0 1 3.2 1.4L13.6 9h4.8a2 2 0 0 1 2 2.4l-1.4 6.6a3 3 0 0 1-2.9 2.3H7z"/><rect x="2.5" y="10" width="4.5" height="12" rx="1"/></svg>
-        </button>
-        <button id="cc-toy" class="toy-btn" type="button" aria-pressed="false" aria-label="Call it whack" title="Whack – vote this piece down">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M17 2v12l-4.2 6.4a1.8 1.8 0 0 1-3.2-1.4L10.4 15H5.6a2 2 0 0 1-2-2.4l1.4-6.6A3 3 0 0 1 7.9 2H17z"/><rect x="17" y="2" width="4.5" height="12" rx="1"/></svg>
-        </button>
-        <button id="cc-bench" type="button" aria-label="Open Bench View" title="Bench View – inspect this car in high resolution">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21M10.5 7.5v6M7.5 10.5h6"/></svg>
-        </button>
-        <button id="cc-report" type="button" aria-label="Report this car" title="Report this car to moderators">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 21V4h11l-1.5 3.5L16 11H5"/></svg>
-        </button>
-        <button id="cc-comments" type="button" aria-label="Open comments" title="Comments" hidden>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"/></svg>
-          <span id="cc-comments-count"></span>
-        </button>
-      </div>
-      <button id="cc-paint" class="cc-paint" type="button" aria-label="Paint this car">
-        <span class="cc-paint-icon" aria-hidden="true"></span>
-        <span class="cc-paint-label">Use This Car</span>
-      </button>
-      <div id="promo-slide-panel" aria-hidden="true" inert>
-        <div class="promo-drawer-text">
-          <strong>OFFICIAL PROMO</strong>
-          <span>Support the brands that support the yard.</span>
+    <div id="sel-panel" hidden>
+      <aside id="comment-wall" aria-labelledby="cw-title">
+        <header class="cw-head">
+          <h2 id="cw-title">Wall Talk</h2>
+          <span id="cw-count" aria-live="polite"></span>
+        </header>
+        <ol id="cw-list"></ol>
+        <p id="cw-empty">No words yet. Drop the first one.</p>
+        <form id="cw-form" autocomplete="off">
+          <textarea id="cw-text" maxlength="280" rows="2" placeholder="Say something about this piece..." aria-label="Write a comment"></textarea>
+          <div class="cw-row">
+            <span id="cw-left" aria-hidden="true"></span>
+            <button id="cw-send" type="submit">Post</button>
+          </div>
+        </form>
+      </aside>
+      <div id="car-card" hidden>
+        <button id="cc-close" class="cc-close" type="button" aria-label="Close car panel" title="Close">&times;</button>
+        <div class="cc-nav">
+          <button id="cc-prev" type="button" aria-label="Car to the left" title="Car to the left">&lsaquo;</button>
+          <span id="cc-count" aria-live="polite"></span>
+          <button id="cc-next" type="button" aria-label="Car to the right" title="Car to the right">&rsaquo;</button>
         </div>
-        <button id="visit-promo-btn" class="btn promo-action-btn" type="button">Visit Link</button>
+        <div class="cc-date"></div>
+        <div class="cc-by"></div>
+        <div class="cc-approval"></div>
+        <div class="cc-tally" aria-live="polite"><span id="cc-props-count">0</span> props · <span id="cc-toy-count">0</span> whack</div>
+        <div id="cc-competition" hidden>
+          <p id="cc-competition-status"></p>
+          <button id="cc-competition-vote" type="button">Vote for This Entry</button>
+          <button id="cc-competition-share" type="button">Share Entry</button>
+        </div>
+        <div class="cc-actions">
+          <button id="cc-props" type="button" aria-label="Give props" title="Give Props">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M7 22V10l4.2-6.4a1.8 1.8 0 0 1 3.2 1.4L13.6 9h4.8a2 2 0 0 1 2 2.4l-1.4 6.6a3 3 0 0 1-2.9 2.3H7z"/><rect x="2.5" y="10" width="4.5" height="12" rx="1"/></svg>
+          </button>
+          <button id="cc-toy" class="toy-btn" type="button" aria-pressed="false" aria-label="Call it whack" title="Whack – vote this piece down">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M17 2v12l-4.2 6.4a1.8 1.8 0 0 1-3.2-1.4L10.4 15H5.6a2 2 0 0 1-2-2.4l1.4-6.6A3 3 0 0 1 7.9 2H17z"/><rect x="17" y="2" width="4.5" height="12" rx="1"/></svg>
+          </button>
+          <button id="cc-bench" type="button" aria-label="Open Bench View" title="Bench View – inspect this car in high resolution">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21M10.5 7.5v6M7.5 10.5h6"/></svg>
+          </button>
+          <button id="cc-report" type="button" aria-label="Report this car" title="Report this car to moderators">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 21V4h11l-1.5 3.5L16 11H5"/></svg>
+          </button>
+        </div>
+        <button id="cc-paint" class="cc-paint" type="button" aria-label="Paint this car">
+          <span class="cc-paint-icon" aria-hidden="true"></span>
+          <span class="cc-paint-label">Use This Car</span>
+        </button>
+        <div id="promo-slide-panel" aria-hidden="true" inert>
+          <div class="promo-drawer-text">
+            <strong>OFFICIAL PROMO</strong>
+            <span>Support the brands that support the yard.</span>
+          </div>
+          <button id="visit-promo-btn" class="btn promo-action-btn" type="button">Visit Link</button>
+        </div>
       </div>
     </div>
-    <aside id="comment-wall" hidden aria-labelledby="cw-title">
-      <header class="cw-head">
-        <h2 id="cw-title">Wall Talk</h2>
-        <span id="cw-count" aria-live="polite"></span>
-        <button id="cw-close" type="button" aria-label="Close comments" title="Close">&times;</button>
-      </header>
-      <ol id="cw-list"></ol>
-      <p id="cw-empty">No words yet. Drop the first one.</p>
-      <form id="cw-form" autocomplete="off">
-        <textarea id="cw-text" maxlength="280" rows="2" placeholder="Say something about this piece..." aria-label="Write a comment"></textarea>
-        <div class="cw-row">
-          <span id="cw-left" aria-hidden="true"></span>
-          <button id="cw-send" type="submit">Post</button>
-        </div>
-      </form>
-    </aside>
     <div id="writer-id" hidden role="dialog" aria-labelledby="wid-title" data-mode="account">
       <div class="wid-kicker"><img src="/Images/BoxBapLogoSm.png" alt="BoxBap.com" /></div>
       <h2 id="wid-title">BOXBAP.COM ACCOUNT</h2>

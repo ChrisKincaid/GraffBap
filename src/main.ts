@@ -1,4 +1,4 @@
-﻿import './style.css';
+import './style.css';
 import {
   playPeel,
   playPuff,
@@ -3598,16 +3598,18 @@ const rollCarLabel = document.getElementById('rollby-car')!;
 const rollPlayBtn = document.getElementById('rollby-play') as HTMLButtonElement;
 const rollSpeedBtn = document.getElementById('rollby-speed') as HTMLButtonElement;
 
-function rollLayout(W = window.innerWidth, H = window.innerHeight) {
+function rollLayout(W = window.innerWidth, H = window.innerHeight, fit = CAR_FIT) {
   const contentH = Math.min(H, W / 2.39);
-  const scale = Math.min(contentH / ROLL_VIEW_H, (W * CAR_FIT) / CAR_WIDTH);
+  const scale = Math.min(contentH / ROLL_VIEW_H, (W * fit) / CAR_WIDTH);
   return { W, H, bar: (H - ROLL_VIEW_H * scale) / 2, scale };
 }
 
 // The landing reel renders into its framed canvas; the editor's Roll-By uses the full viewport.
+// A selected car is drawn at full width, edge to edge.
 function activeRollLayout(showcase = !!roll?.showcase) {
   return showcase
-    ? rollLayout(Math.max(1, showcaseCanvas.clientWidth), Math.max(1, showcaseCanvas.clientHeight))
+    ? rollLayout(Math.max(1, showcaseCanvas.clientWidth), Math.max(1, showcaseCanvas.clientHeight),
+      reelSel.top.pinned !== null ? 1 : CAR_FIT)
     : rollLayout();
 }
 
@@ -3807,6 +3809,9 @@ function renderRollBy(now: number): void {
   r.lastT = now;
   if (!r.paused) r.x += (r.showcase ? -1 : 1) * ROLL_SPEED * ROLL_SPEEDS[r.speedIdx]!.rate * dt;
   if (r.showcase) maybeGrowTop();
+  // A selected car stays centered even as its reel resizes around it.
+  const pinnedTop = r.showcase && r.paused ? reelSel.top.pinned : null;
+  if (pinnedTop !== null) r.x = pinnedTop * CAR_WIDTH + CAR_WIDTH / 2 - L.W / (2 * L.scale);
   // Loop: once the last car clears, the train re-enters from the right.
   if (r.x > rollCount(r) * CAR_WIDTH) r.x = -L.W / L.scale;
   else if (r.x < -L.W / L.scale) r.x = rollCount(r) * CAR_WIDTH;
@@ -3830,7 +3835,8 @@ function renderRollBy(now: number): void {
 
   ctx.setTransform(px, 0, 0, px, 0, 0);
   if (r.showcase) {
-    drawCrossing(ctx, L, rc.y, now);
+    // The crossing sign would sit on top of a selected, full-width car.
+    if (reelSel.top.pinned === null) drawCrossing(ctx, L, rc.y, now);
     trackSelection(ctx, 'top', rollCount(r), (i) => rc.x + i * CAR_WIDTH * L.scale, L.scale, rc.y, L.W);
   }
   // The landing reel lets the yard fill its frame; only the cinematic Roll-By gets letterboxed.
@@ -3865,8 +3871,9 @@ function sizeShowcaseCanvas(): void {
   if (showcaseCanvas.height !== h) showcaseCanvas.height = h;
 }
 const carCard = document.getElementById('car-card')!;
+const selPanel = document.getElementById('sel-panel')!;
+const landingEl = document.getElementById('landing')!;
 const ccTally = carCard.querySelector('.cc-tally') as HTMLElement;
-const ccPreview = document.getElementById('cc-preview') as HTMLCanvasElement;
 const ccDate = carCard.querySelector('.cc-date')!;
 const ccBy = carCard.querySelector('.cc-by') as HTMLElement;
 const ccPropsBtn = document.getElementById('cc-props') as HTMLButtonElement;
@@ -3879,19 +3886,10 @@ const ccPrevBtn = document.getElementById('cc-prev') as HTMLButtonElement;
 const ccNextBtn = document.getElementById('cc-next') as HTMLButtonElement;
 const ccCount = document.getElementById('cc-count')!;
 const ccPaintBtn = document.getElementById('cc-paint') as HTMLButtonElement;
-const ccCommentsBtn = document.getElementById('cc-comments') as HTMLButtonElement;
-const ccCommentsCount = document.getElementById('cc-comments-count')!;
 const commentWall = createCommentWall({
   user: () => currentUser,
   requireAccount: (retry) => requireAuth(retry, true),
   toast: (message, ms) => showToast(message, ms),
-});
-commentWall.onCountChange((n) => {
-  ccCommentsCount.textContent = n ? String(n >= 50 ? '50+' : n) : '';
-});
-ccCommentsBtn.addEventListener('click', () => {
-  ccCommentsBtn.blur();
-  commentWall.openMobile();
 });
 const PENCIL_SVG =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20l4-1 11-11-3-3L5 16z"/><path d="M14 7l3 3"/></svg>';
@@ -4277,35 +4275,27 @@ const cardEntryAt = (i: number): RollEntry | null => {
 
 function showCard(i: number, src: 'top' | 'sub' = 'top'): void {
   if (i === cardCar && src === cardSrc) return;
-  const previousFrame = document.getElementById(cardSrc === 'sub' ? 'subway-frame' : 'showcase-frame');
-  previousFrame?.classList.remove('has-selection', 'has-wall');
   cardSrc = src;
   const e = cardEntryAt(i);
   cardCar = e ? i : -1;
-  carCard.hidden = !e;
-  const frame = document.getElementById(src === 'sub' ? 'subway-frame' : 'showcase-frame');
-  frame?.classList.toggle('has-selection', !!e);
+  carCard.hidden = selPanel.hidden = !e;
   if (!e) {
     commentWall.show(null);
     setPromoDrawer(false);
     visitPromoBtn.onclick = null;
-    carCard.style.left = '';
-    carCard.style.top = '';
-    carCard.style.bottom = '';
-    delete carCard.dataset.dock;
+    delete landingEl.dataset.sel;
+    landingEl.classList.remove('sel-fit');
     return;
   }
-  positionCarCard();
+  landingEl.dataset.sel = src;
+  selPanel.dataset.src = src;
   renderCard(e);
 }
 
-// Published pieces (including battle entries) get a comment wall in the left gutter.
+// Every selected car gets the comment half; only published pieces can actually take comments.
 function syncCommentWall(e: RollEntry): void {
   const reg = !e.isPromo ? e.reg : undefined;
-  const wallCar = reg ? { id: reg.id, writerUid: reg.writerUid } : null;
-  commentWall.show(wallCar);
-  ccCommentsBtn.hidden = !wallCar;
-  document.getElementById(cardSrc === 'sub' ? 'subway-frame' : 'showcase-frame')?.classList.toggle('has-wall', !!wallCar);
+  commentWall.show(reg ? { id: reg.id, writerUid: reg.writerUid } : null);
   positionCarCard();
 }
 
@@ -4378,28 +4368,6 @@ function renderCard(e: RollEntry): void {
     (n < 2 && !canPageNext) ||
     (cardSrc === 'top' && !myWork.top && !!topPager && cardCar === n - 1) ||
     (cardSrc === 'sub' && !myWork.sub && !!subPager && cardCar === n - 1 && subPager.done);
-  drawCardPreview(e);
-}
-
-// The full-screen phone panel shows the car itself, so there's no guessing which one you tapped.
-function drawCardPreview(e: RollEntry): void {
-  if (!mobileCard() || carCard.dataset.dock) return;
-  const w = Math.max(1, Math.round(ccPreview.clientWidth || carCard.clientWidth - 28));
-  const scale = w / CAR_WIDTH;
-  const h = Math.max(1, Math.round(EXPORT_CROP.h * scale));
-  const d = Math.min(window.devicePixelRatio || 1, 2);
-  ccPreview.width = Math.round(w * d);
-  ccPreview.height = Math.round(h * d);
-  ccPreview.style.height = `${h}px`;
-  const ctx = ccPreview.getContext('2d');
-  if (!ctx) return;
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.clearRect(0, 0, ccPreview.width, ccPreview.height);
-  const s = d * scale;
-  ctx.setTransform(s, 0, 0, s, 0, -EXPORT_CROP.y * s);
-  const img = cardSrc === 'sub' ? subwayReel.images[cardCar] : roll?.images[cardCar];
-  drawCarComposite(ctx, entryBaseId(e), img ?? null, false);
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
 }
 
 // Keeps the open card in step with the reel's active car.
@@ -4408,61 +4376,45 @@ function refreshCard(): void {
   if (e) renderCard(e);
 }
 
-// Phones get a full-screen panel instead of a side gutter.
+// Phones swipe the rating card to flip between cars.
 const mobileCard = () => window.matchMedia('(max-width: 700px)').matches;
 
-// The selected-car panel sits in the gutter the reel track opens up, so it reads as part of the reel.
-function positionCarCard(): void {
-  if (cardCar < 0 || carCard.hidden) return;
-  const wallEl = commentWall.element;
-  const frame = document.getElementById(cardSrc === 'sub' ? 'subway-frame' : 'showcase-frame');
-  const track = frame?.querySelector('.reel-track');
-  if (mobileCard()) {
-    dockMobileCard(track?.getBoundingClientRect() ?? null, wallEl);
-    return;
-  }
-  carCard.style.bottom = '';
-  delete carCard.dataset.dock;
-  if (!track) return;
-  const bounds = track.getBoundingClientRect();
-  const top = Math.max(12, Math.min(bounds.top, innerHeight - carCard.offsetHeight - 12));
-  carCard.style.left = `${bounds.right}px`;
-  carCard.style.top = `${top}px`;
-  if (!wallEl.hidden) {
-    // Mirrors the car panel: same top and height, in the gutter left of the track.
-    wallEl.style.left = `${bounds.left - wallEl.offsetWidth}px`;
-    wallEl.style.top = `${top}px`;
-    wallEl.style.height = `${carCard.offsetHeight}px`;
-  }
+// Selected-car layout: the selected reel keeps its car centered and paused, and one panel
+// (comments left, rating right) covers everything on the other side of the screen.
+// When the car is limited by width (phones, portrait), its reel shrinks to the car's height
+// so the car fills it edge to edge and the panel gets the rest.
+function selectedCarFrameHeight(frame: HTMLElement, src: ReelId): number {
+  const track = frame.querySelector<HTMLElement>('.reel-track');
+  if (!track) return 0;
+  const w = track.clientWidth;
+  const trackH = src === 'sub' ? ((EXPORT_CROP.h + 10) * w) / CAR_WIDTH + 16 : (ROLL_VIEW_H * w) / CAR_WIDTH;
+  return Math.ceil(track.offsetTop + trackH + (frame.offsetHeight - frame.clientHeight));
 }
 
-// Phones keep the selected car visible, paused in its reel, and dock the panel over the other half:
-// train (top reel) -> panel below it; subway (bottom reel) -> panel above it.
-const MOBILE_DOCK_MIN = 240;
-function dockMobileCard(track: DOMRect | null, wallEl: HTMLElement): void {
-  carCard.style.left = '';
-  wallEl.style.left = wallEl.style.height = '';
-  let top = 0;
-  let bottom = 0;
-  let dock: 'top' | 'bottom' | '' = '';
-  if (track && cardSrc === 'top' && innerHeight - track.bottom >= MOBILE_DOCK_MIN) {
-    top = Math.round(track.bottom);
-    dock = 'bottom';
-  } else if (track && cardSrc === 'sub' && track.top >= MOBILE_DOCK_MIN) {
-    bottom = Math.round(innerHeight - track.top);
-    dock = 'top';
-  }
-  // Too little room left to dock: fall back to the full-screen panel with its own car preview.
-  const was = carCard.dataset.dock ?? '';
-  if (dock) carCard.dataset.dock = dock;
-  else delete carCard.dataset.dock;
-  carCard.style.top = wallEl.style.top = `${top}px`;
-  carCard.style.bottom = wallEl.style.bottom = `${bottom}px`;
-  if (was && !dock) {
-    const e = cardEntryAt(cardCar);
-    if (e) drawCardPreview(e);
-  }
+function positionCarCard(): void {
+  if (cardCar < 0 || carCard.hidden) return;
+  const own = document.getElementById(cardSrc === 'sub' ? 'subway-frame' : 'showcase-frame');
+  const other = document.getElementById(cardSrc === 'sub' ? 'showcase-frame' : 'subway-frame');
+  if (!own || !other) return;
+  // Both reels share the same 1fr row height, so the other reel's height is the natural size.
+  const fitH = selectedCarFrameHeight(own, cardSrc);
+  const fit = fitH > 0 && fitH < other.offsetHeight - 1;
+  const h = `${fitH}px`;
+  if (landingEl.style.getPropertyValue('--sel-h') !== h) landingEl.style.setProperty('--sel-h', h);
+  landingEl.classList.toggle('sel-fit', fit);
+  const o = own.getBoundingClientRect();
+  const x = other.getBoundingClientRect();
+  const gap = 6;
+  const top = cardSrc === 'sub' ? x.top : o.bottom + gap;
+  const bottom = cardSrc === 'sub' ? o.top - gap : x.bottom;
+  const css = [`${Math.round(o.left)}px`, `${Math.round(top)}px`, `${Math.round(o.width)}px`, `${Math.max(0, Math.round(bottom - top))}px`];
+  const s = selPanel.style;
+  if (s.left !== css[0]) s.left = css[0]!;
+  if (s.top !== css[1]) s.top = css[1]!;
+  if (s.width !== css[2]) s.width = css[2]!;
+  if (s.height !== css[3]) s.height = css[3]!;
 }
+window.addEventListener('resize', positionCarCard);
 
 // Closing the card hands the reel back to the viewer, rolling.
 ccCloseBtn.addEventListener('click', () => {
@@ -5907,7 +5859,7 @@ subBackBtn.addEventListener('click', () => loadSubwayLine(null));
 subwayCanvas.addEventListener('pointerup', (e) => inspectRollingCar(subCarAt(e.offsetX), 'sub'));
 subwayCanvas.addEventListener('pointerleave', (e) => {
   if (cardSrc !== 'sub' || reelSel.sub.pinned !== null) return;
-  if (!(e.relatedTarget instanceof Node && carCard.contains(e.relatedTarget))) showCard(-1, 'sub');
+  if (!(e.relatedTarget instanceof Node && selPanel.contains(e.relatedTarget))) showCard(-1, 'sub');
 });
 renderSubControls();
 
@@ -5952,7 +5904,8 @@ function renderSubwayReel(now: number): void {
   const ph = Math.round(H * px);
   if (subwayCanvas.width !== pw) subwayCanvas.width = pw;
   if (subwayCanvas.height !== ph) subwayCanvas.height = ph;
-  const scale = Math.min((H - 16) / (EXPORT_CROP.h + 10), (W * CAR_FIT) / CAR_WIDTH);
+  const pinnedSub = subwayReel.paused ? reelSel.sub.pinned : null;
+  const scale = Math.min((H - 16) / (EXPORT_CROP.h + 10), (W * (pinnedSub !== null ? 1 : CAR_FIT)) / CAR_WIDTH);
   const oy = (H - EXPORT_CROP.h * scale) / 2 - EXPORT_CROP.y * scale;
   const railY = oy + 1142 * scale;
   const trainW = subwayReel.entries.length * CAR_WIDTH * scale;
@@ -5962,6 +5915,7 @@ function renderSubwayReel(now: number): void {
   if (!subwayReel.paused) {
     subwayReel.sx -= ROLL_SPEED * ROLL_SPEEDS[subwayReel.speedIdx]!.rate * scale * dt;
   }
+  if (pinnedSub !== null) subwayReel.sx = W / 2 - (pinnedSub * CAR_WIDTH + CAR_WIDTH / 2) * scale;
   if (subwayReel.sx + trainW < 0) subwayReel.sx = W;
   else if (subwayReel.sx > W) subwayReel.sx = -trainW;
   maybeGrowSub(W, scale);
@@ -5979,15 +5933,19 @@ function renderSubwayReel(now: number): void {
     if (i > 0) drawKnuckle(ctx, 0);
   });
   ctx.setTransform(px, 0, 0, px, 0, 0);
-  const shade = ctx.createLinearGradient(0, 0, W, 0);
-  shade.addColorStop(0, 'rgba(0,0,0,0.55)');
-  shade.addColorStop(0.12, 'rgba(0,0,0,0)');
-  shade.addColorStop(0.88, 'rgba(0,0,0,0)');
-  shade.addColorStop(1, 'rgba(0,0,0,0.55)');
-  ctx.fillStyle = shade;
-  ctx.fillRect(0, 0, W, H);
+  // Edge shading would darken the ends of a selected, full-width car.
+  if (pinnedSub === null) {
+    const shade = ctx.createLinearGradient(0, 0, W, 0);
+    shade.addColorStop(0, 'rgba(0,0,0,0.55)');
+    shade.addColorStop(0.12, 'rgba(0,0,0,0)');
+    shade.addColorStop(0.88, 'rgba(0,0,0,0)');
+    shade.addColorStop(1, 'rgba(0,0,0,0.55)');
+    ctx.fillStyle = shade;
+    ctx.fillRect(0, 0, W, H);
+  }
 
   trackSelection(ctx, 'sub', subwayReel.entries.length, (i) => subwayReel.sx + i * CAR_WIDTH * scale, scale, oy, W);
+  if (cardSrc === 'sub') positionCarCard();
 }
 
 // ---------- Session: the "still working?" idle check ----------

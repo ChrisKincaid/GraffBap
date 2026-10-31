@@ -25,7 +25,6 @@ const form = document.getElementById('cw-form') as HTMLFormElement;
 const input = document.getElementById('cw-text') as HTMLTextAreaElement;
 const left = document.getElementById('cw-left') as HTMLElement;
 const send = document.getElementById('cw-send') as HTMLButtonElement;
-const close = document.getElementById('cw-close') as HTMLButtonElement;
 
 function reportedKey(carId: string, commentId: string, uid: string | undefined): string {
   return `${uid ?? 'guest'}|${carId}|${commentId}`;
@@ -59,7 +58,6 @@ export function createCommentWall(deps: WallDeps) {
   let loaded = false;
   let failed = false;
   let posting = false;
-  let mobileOpen = false;
   let onCount: ((n: number | null) => void) | null = null;
 
   const signedIn = () => {
@@ -115,8 +113,12 @@ export function createCommentWall(deps: WallDeps) {
       li.append(head, text);
       return li;
     }));
-    empty.hidden = !loaded || comments.length > 0;
-    empty.textContent = failed ? 'Comments could not load right now.' : 'No words yet. Drop the first one.';
+    // Sample and promo cars have nothing to comment on, so the wall says so instead of vanishing.
+    form.hidden = !car;
+    empty.hidden = !!car && (!loaded || comments.length > 0);
+    empty.textContent = !car
+      ? 'Comments open on published pieces.'
+      : failed ? 'Comments could not load right now.' : 'No words yet. Drop the first one.';
     count.textContent = loaded && comments.length ? String(comments.length >= 50 ? '50+' : comments.length) : '';
     onCount?.(loaded ? comments.length : null);
     renderComposer();
@@ -175,7 +177,6 @@ export function createCommentWall(deps: WallDeps) {
       deps.requireAccount(() => input.focus());
     }
   });
-  close.addEventListener('click', () => setMobileOpen(false));
 
   async function submit(): Promise<void> {
     if (!car || posting) return;
@@ -204,14 +205,8 @@ export function createCommentWall(deps: WallDeps) {
     }
   }
 
-  function setMobileOpen(open: boolean): void {
-    mobileOpen = open;
-    wall.classList.toggle('is-open', open);
-    if (open) input.blur();
-  }
-
   return {
-    // Shows the wall for a published piece, or hides it when `next` is null.
+    // Loads the wall for a published piece; `null` shows the "published pieces only" note.
     show(next: WallCar | null): void {
       if (next?.id === car?.id) {
         if (next) car = next;
@@ -224,8 +219,6 @@ export function createCommentWall(deps: WallDeps) {
       comments = [];
       loaded = false;
       failed = false;
-      if (!next) setMobileOpen(false);
-      wall.hidden = !next;
       if (next) {
         input.value = '';
         unsubscribe = watchComments(next.id, (items) => {
@@ -243,10 +236,6 @@ export function createCommentWall(deps: WallDeps) {
         });
       }
       render();
-    },
-    openMobile: () => setMobileOpen(true),
-    get mobileOpen() {
-      return mobileOpen;
     },
     get element() {
       return wall;

@@ -1323,15 +1323,17 @@ body.showcase .dispatch {
   overflow: hidden;
   background: #000;
   grid-row: 2;
-  transition: margin-right 160ms ease, margin-left 160ms ease;
 }
 
-.reel.has-selection .reel-track {
-  margin-right: 296px;
+/* Selected car on a width-limited screen: its reel shrinks to the car so the panel gets the rest. */
+#landing.sel-fit[data-sel='top'] #showcase-frame {
+  height: var(--sel-h);
+  align-self: start;
 }
 
-.reel.has-wall .reel-track {
-  margin-left: 260px;
+#landing.sel-fit[data-sel='sub'] #subway-frame {
+  height: var(--sel-h);
+  align-self: end;
 }
 
 /* Graffiti loader: a shaking can spraying a drippy tag while the line-up downloads. */
@@ -2132,16 +2134,46 @@ body.showcase .dispatch {
 }
 
 
-#car-card {
+/* One panel for the selected car: comments on the left, rating on the right. It covers the
+   other side of the screen (below a selected train, above a selected subway car). */
+#sel-panel {
   position: fixed;
   z-index: 12;
+  display: flex;
+  box-sizing: border-box;
+  min-height: 0;
+  overflow: hidden;
+  border: 2px solid #2c2f36;
+  border-radius: 6px;
+  background: #000;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+}
+
+#sel-panel[data-src='top'] {
+  border-top-color: #ffd200;
+}
+
+#sel-panel[data-src='sub'] {
+  border-bottom-color: #ffd200;
+}
+
+#sel-panel[hidden] {
+  display: none;
+}
+
+#car-card {
+  position: relative;
   isolation: isolate;
   display: flex;
-  width: 296px;
+  flex: 0 0 320px;
+  width: 320px;
   min-width: 0;
+  min-height: 0;
   flex-direction: column;
   box-sizing: border-box;
   padding: 12px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   border: none;
   border-left: 1px solid #2c2f36;
   background: #000;
@@ -2149,39 +2181,38 @@ body.showcase .dispatch {
   font: 12px/1.4 system-ui, sans-serif;
 }
 
-.cc-preview {
-  display: none;
-}
-
 #promo-slide-panel {
-  position: absolute;
-  right: 100%;
-  top: 0;
-  bottom: 0;
-  z-index: -1;
+  position: relative;
+  z-index: auto;
   display: flex;
-  width: 124px;
+  width: 100%;
   box-sizing: border-box;
+  max-height: 0;
+  overflow: hidden;
   background: #1a1a1a;
-  border: 2px dashed #f39c12;
+  border: 0 dashed #f39c12;
   border-radius: 8px;
-  padding: 12px;
+  padding: 0 12px;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  flex-direction: column;
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
-  transform: translateX(100%);
-  transition: transform 0.3s ease-out, opacity 0.3s ease-out, visibility 0.3s;
+  transform: translateY(-15px);
+  transition: transform 0.3s ease-out, opacity 0.3s ease-out, visibility 0.3s,
+    max-height 0.3s ease-out, padding 0.3s ease-out, margin 0.3s ease-out;
 }
 
 #promo-slide-panel.is-open {
+  max-height: 220px;
+  padding: 12px;
+  margin-top: 12px;
+  border-width: 2px;
   opacity: 1;
   visibility: visible;
   pointer-events: auto;
-  transform: translateX(0);
+  transform: translateY(0);
 }
 
 .promo-drawer-text {
@@ -2206,30 +2237,6 @@ body.showcase .dispatch {
 .promo-action-btn:hover {
   background: #e67e22;
   transform: scale(1.05);
-}
-
-@media (max-width: 700px) {
-  #promo-slide-panel {
-    position: relative;
-    inset: auto;
-    z-index: auto;
-    width: 100%;
-    max-height: 0;
-    overflow: hidden;
-    padding: 0 12px;
-    border-width: 0;
-    transform: translateY(-15px);
-    transition: transform 0.3s ease-out, opacity 0.3s ease-out, visibility 0.3s,
-      max-height 0.3s ease-out, padding 0.3s ease-out, margin 0.3s ease-out;
-  }
-
-  #promo-slide-panel.is-open {
-    max-height: 220px;
-    padding: 12px;
-    margin-top: 22px;
-    border-width: 2px;
-    transform: translateY(0);
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -2268,66 +2275,51 @@ body.showcase .dispatch {
   font: 700 11px/1 ui-monospace, monospace;
 }
 
+/* Narrow screens stack the panel: rating next to the selected car, comments filling the rest. */
 @media (max-width: 700px) {
-  .reel.has-selection .reel-track {
-    margin-right: 0;
+  #sel-panel {
+    flex-direction: column;
   }
 
-  /* Tapping a car opens a full-screen panel, so there's no doubt which car it is. */
+  #sel-panel[data-src='top'] {
+    flex-direction: column-reverse;
+  }
+
+  #sel-panel[data-src='sub'] {
+    flex-direction: column;
+  }
+
   #car-card {
-    position: fixed;
-    inset: 0;
+    flex: 0 0 auto;
     width: auto;
-    max-width: none;
-    height: auto;
-    padding: 54px 14px 14px;
-    border: none;
-    border-radius: 0;
-    background: #0b0c0f;
-    overflow-y: auto;
-    overscroll-behavior: contain;
+    max-height: 62%;
+    padding: 10px 12px 12px;
+    border-left: none;
+    border-top: 1px solid #2c2f36;
     /* Horizontal drags are ours (swipe between cars); vertical still scrolls. */
     touch-action: pan-y;
-    z-index: 30;
+  }
+
+  /* The rating card sits next to the selected car; comments fill the far end. */
+  #sel-panel[data-src='top'] #car-card {
+    border-top: none;
+    border-bottom: 1px solid #2c2f36;
   }
 
   #car-card .cc-nav {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
     gap: 10px;
-    margin-bottom: 14px;
+    margin: 0 50px 8px 0;
   }
 
   #car-card .cc-nav button {
-    min-width: 96px;
-    min-height: 44px;
-    padding: 0 14px;
-    border: 1px solid #3a3d44;
+    min-width: 84px;
+    min-height: 40px;
     border-radius: 8px;
-    background: #15171b;
-    color: #e8e6e1;
     font: 800 14px/1 ui-monospace, monospace;
-    cursor: pointer;
-  }
-
-  #car-card .cc-nav button:disabled {
-    opacity: 0.35;
   }
 
   #cc-count {
-    color: #8a877f;
     font: 700 13px/1 ui-monospace, monospace;
-  }
-
-  #car-card .cc-preview {
-    display: block;
-    width: 100%;
-    height: auto;
-    margin-bottom: 14px;
-    border: 1px solid #2c2f36;
-    border-radius: 4px;
-    background: #000;
   }
 
   #car-card .cc-close {
@@ -2349,19 +2341,19 @@ body.showcase .dispatch {
   #car-card .cc-by,
   #car-card .cc-approval,
   #car-card .cc-tally {
-    font-size: 14px;
+    font-size: 13px;
   }
 
   #car-card .cc-actions {
-    gap: 10px;
-    margin: 16px 0 0;
+    gap: 8px;
+    margin: 8px 0 0;
     padding: 0;
     border: none;
     background: none;
   }
 
   #car-card .cc-actions > button {
-    min-height: 52px;
+    min-height: 46px;
     border: 1px solid #3a3d44;
     border-radius: 8px;
   }
@@ -2372,47 +2364,13 @@ body.showcase .dispatch {
   }
 
   #car-card .cc-paint {
-    margin: 12px 0 0;
-    min-height: 54px;
+    margin: 10px 0 0;
+    min-height: 46px;
     border: none;
     border-radius: 8px;
     font-size: 14px;
   }
-
-  /* Docked over the other reel: the real car stays visible, so no preview copy. */
-  #car-card[data-dock] {
-    padding: 12px 14px 14px;
-  }
-
-  #car-card[data-dock='bottom'] {
-    border-top: 2px solid #ffd200;
-  }
-
-  #car-card[data-dock='top'] {
-    border-bottom: 2px solid #ffd200;
-  }
-
-  #car-card[data-dock] .cc-preview {
-    display: none;
-  }
-
-  #car-card[data-dock] .cc-nav {
-    margin-right: 50px;
-  }
-
-  /* In-flow close button that shares the nav row, so the whole block can hug the selected car. */
-  #car-card[data-dock] .cc-close {
-    position: static;
-    flex: none;
-    align-self: flex-end;
-    margin-bottom: -42px;
-  }
-
-  #car-card[data-dock='top'] .cc-close {
-    margin-top: auto;
-  }
 }
-
 #car-card[hidden] {
   display: none;
 }
@@ -4520,12 +4478,12 @@ body.rollby #toolbar {
   width: auto;
 }
 
-/* Comment wall: mirrors the car panel in the left gutter on desktop; a full-screen sheet on phones. */
+/* Comment wall: the left (or, on phones, the far) half of the selected-car panel. */
 #comment-wall {
-  position: fixed;
-  z-index: 12;
+  position: relative;
   display: flex;
-  width: 260px;
+  flex: 1 1 auto;
+  min-width: 0;
   min-height: 0;
   flex-direction: column;
   box-sizing: border-box;
@@ -4534,10 +4492,6 @@ body.rollby #toolbar {
   background: #000;
   color: #ddd;
   font: 12px/1.4 system-ui, sans-serif;
-}
-
-#comment-wall[hidden] {
-  display: none;
 }
 
 .cw-head {
@@ -4559,10 +4513,6 @@ body.rollby #toolbar {
 #cw-count {
   color: #8a877f;
   font: 600 11px/1 ui-monospace, monospace;
-}
-
-#cw-close {
-  display: none;
 }
 
 #cw-list {
@@ -4700,73 +4650,14 @@ body.rollby #toolbar {
   cursor: default;
 }
 
-#cc-comments {
-  display: none;
-}
-
 @media (max-width: 700px) {
-  .reel.has-wall .reel-track {
-    margin-left: 0;
-  }
-
-  #car-card .cc-actions > #cc-comments:not([hidden]) {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 4px;
-    border: 1px solid #555;
-    border-radius: 6px;
-    background: #2a2a2a;
-    color: #eee;
-    font: 700 13px/1 ui-monospace, monospace;
-    cursor: pointer;
-  }
-
-  #cc-comments svg {
-    width: 18px;
-    height: 18px;
-  }
-
-  #cc-comments-count:empty {
-    display: none;
-  }
-
   #comment-wall {
-    display: none;
-  }
-
-  #comment-wall.is-open:not([hidden]) {
-    inset: 0;
-    z-index: 31;
-    display: flex;
-    width: auto;
-    padding: 14px;
-    border: none;
-    background: #0b0c0f;
+    border-right: none;
     font-size: 14px;
   }
 
-  #comment-wall.is-open #cw-close {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 40px;
-    height: 40px;
-    margin-left: auto;
-    border: 1px solid #3a3d44;
-    border-radius: 8px;
-    background: #15171b;
-    color: #e8e6e1;
-    font-size: 26px;
-    cursor: pointer;
-  }
-
-  .cw-head {
-    align-items: center;
-  }
-
   #cw-title {
-    font-size: 20px;
+    font-size: 18px;
   }
 
   .cw-meta strong,
