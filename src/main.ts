@@ -5589,7 +5589,7 @@ document.getElementById('sync-btn')!.addEventListener('click', (e) => {
 });
 renderAccount();
 
-const reelCarAt = (e: PointerEvent): number => {
+const reelCarAt = (e: MouseEvent): number => {
   const bounds = showcaseCanvas.getBoundingClientRect();
   return rollCarAt(e.clientX - bounds.left, e.clientY - bounds.top);
 };
@@ -5644,10 +5644,12 @@ function inspectRollingCar(i: number, source: ReelId): void {
   }
 }
 
-function handleReelTap(e: PointerEvent): void {
+// Select on click, not pointerup: on phones the click fires after pointerup, and once the
+// layout has shifted it would land on whatever moved under the finger (e.g. the feed dropdown).
+function handleReelTap(e: MouseEvent): void {
   inspectRollingCar(reelCarAt(e), 'top');
 }
-showcaseCanvas.addEventListener('pointerup', handleReelTap);
+showcaseCanvas.addEventListener('click', handleReelTap);
 
 // ---------- Bench View ----------
 const BENCH_BG_KEY = 'graffbap_bench_bg';
@@ -6156,6 +6158,10 @@ function loadSubwayLine(yard: YardId | null): void {
   subwayReel.entries = [];
   subwayReel.images = [];
   subwayReel.sx = Number.NaN;
+  // Like the top reel, a fresh line-up rolls in; otherwise a pause left by a selected car
+  // would hold the new train off-screen and the reel would look empty.
+  subwayReel.paused = false;
+  renderSubControls();
   subPager = null;
   subGrowing = false;
   subGrowth = null;
@@ -6206,7 +6212,7 @@ subSpeedBtn.addEventListener('click', () => {
   renderSubControls();
 });
 subBackBtn.addEventListener('click', () => loadSubwayLine(null));
-subwayCanvas.addEventListener('pointerup', (e) => inspectRollingCar(subCarAt(e.offsetX), 'sub'));
+subwayCanvas.addEventListener('click', (e) => inspectRollingCar(subCarAt(e.offsetX), 'sub'));
 subwayCanvas.addEventListener('pointerleave', (e) => {
   if (cardSrc !== 'sub' || reelSel.sub.pinned !== null) return;
   if (!(e.relatedTarget instanceof Node && selPanel.contains(e.relatedTarget))) showCard(-1, 'sub');
