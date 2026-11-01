@@ -7366,10 +7366,13 @@ function renderEntryVote(reg: RegistryCar, button: HTMLButtonElement, status: HT
   status.textContent =
     `${competition?.title ?? 'Battle'} · ${reg.competitionVotes ?? 0} votes · ${open ? 'Voting open' :
       !competitionsLoaded ? 'Checking battle...' : competition?.status === 'open' ? 'Results pending' : 'Voting closed'}`;
+  const busy = competitionVoteBusy === reg.id;
   button.textContent = mine ? 'Your Entry' : !open ? 'Voting Closed' : viewingPast ? 'View Current to Vote'
+    : busy ? (voted ? 'Removing Vote...' : 'Voting...')
     : voted ? 'Remove My Vote' : 'Vote for This Entry';
   button.classList.toggle('is-voted', voted && open && !viewingPast && !mine);
-  button.disabled = !open || viewingPast || mine || competitionVoteBusy === reg.id ||
+  button.setAttribute('aria-busy', String(busy));
+  button.disabled = !open || viewingPast || mine || busy ||
     !['departed', 'hall_of_fame', 'museum'].includes(reg.status);
 }
 

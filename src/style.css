@@ -2684,7 +2684,9 @@ body.showcase .dispatch {
 #cc-props[aria-busy='true'],
 #cc-toy[aria-busy='true'],
 #bench-props[aria-busy='true'],
-#bench-toy[aria-busy='true'] {
+#bench-toy[aria-busy='true'],
+#cc-competition-vote[aria-busy='true'],
+#shared-entry-vote[aria-busy='true'] {
   cursor: progress;
   animation: vote-pending 0.9s ease-in-out infinite alternate;
 }
